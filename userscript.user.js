@@ -32,7 +32,6 @@
 //
 // @run-at       document-idle
 //
-// @version      3.0.0
 // @downloadURL  https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
 // @updateURL    https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
 // ==/UserScript==
