@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.01.14.1
+// @version      2026.01.14.2
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
