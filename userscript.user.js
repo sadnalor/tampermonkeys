@@ -32,8 +32,9 @@
 //
 // @run-at       document-idle
 //
-// @downloadURL  https://katvmte04.eu.world/tetools/userscripts/sfdc/servicecloud.user.js
-// @updateURL    https://katvmte04.eu.world/tetools/userscripts/sfdc/servicecloud.user.js
+// @version      3.0.0
+// @downloadURL  https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
+// @updateURL    https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
 // ==/UserScript==
 
 console.log('init');
