@@ -10,6 +10,7 @@
 // @include      /.*planview--trident.sandbox.lightning.force.*/
 // @include      /.*planview--partialsb.lightning.force.*/
 // @include      /.*planview--partialsb.sandbox.lightning.force.*/
+// @include      /.*planview.my.salesforce.com\/email\/htmlbody\/htmlbody.jsp.*/
 //
 // @connect      whoslookingatcases.herokuapp.com
 // @connect      servicecloudpremium-781150c5a240.herokuapp.com
@@ -2193,4 +2194,185 @@ const tryOpeningProfilePopupToLookForName = () => {
   }
 };
 
-rolandUImods();
+if (window.location.href.indexOf('/email/htmlbody/htmlbody.jsp') === -1) {
+  rolandUImods();
+}
+
+// ============================================================
+// EMAIL EDITOR FULLSCREEN TOGGLE
+// ============================================================
+// Works by running in both the parent Lightning page and the email-editor
+// iframe (htmlbody.jsp). The iframe sends a postMessage ping; the parent
+// receives it, locates the matching <iframe> element (piercing shadow DOM),
+// and attaches a fullscreen toggle button as a sibling of the iframe.
+// Fullscreen styling targets the iframe ELEMENT itself in the parent DOM,
+// so 100vw/100vh refer to the real browser viewport, not the iframe's.
+
+(function () {
+    "use strict";
+
+    const SCP_PING_TYPE = "scp_email_iframe_ping";
+    const SCP_PONG_TYPE = "scp_email_iframe_pong";
+    const isInIframe = window.top !== window.self;
+    const pageHref = window.location.href;
+
+    const css = `
+        .scp-fullscreen-toggle {
+            position: absolute;
+            top: 6px;
+            right: 12px;
+            z-index: 100000;
+            background: #0176d3;
+            color: #ffffff;
+            border: 1px solid #014486;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .scp-fullscreen-toggle:hover {
+            background: #014486;
+        }
+        .scp-fullscreen-toggle.scp-fs-active {
+            position: fixed;
+            top: 12px;
+            right: 20px;
+        }
+        iframe.scp-email-iframe-fullscreen {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 99998 !important;
+            background: #ffffff !important;
+            box-shadow: 0 0 40px rgba(0,0,0,0.4) !important;
+            border: none !important;
+        }
+    `;
+    try {
+        if (typeof GM_addStyle === "function") {
+            GM_addStyle(css);
+        } else {
+            const style = document.createElement("style");
+            style.textContent = css;
+            document.head.appendChild(style);
+        }
+    } catch (e) { /* ignore */ }
+
+    // ============================================================
+    // IFRAME SIDE: send pings so the parent can find this iframe element
+    // ============================================================
+    if (isInIframe && pageHref.indexOf("/email/htmlbody/htmlbody.jsp") !== -1) {
+        const sendPing = function () {
+            try {
+                window.parent.postMessage({ type: SCP_PING_TYPE, href: pageHref }, "https://planview.lightning.force.com");
+            } catch (e) { /* ignore */ }
+        };
+        sendPing();
+        setTimeout(sendPing, 500);
+        setTimeout(sendPing, 1500);
+        setTimeout(sendPing, 3000);
+        return;
+    }
+
+    // ============================================================
+    // PARENT SIDE: listen for pings, attach toggle to the iframe element
+    // ============================================================
+    window.addEventListener("message", function (e) {
+        if (!e.data || e.data.type !== SCP_PING_TYPE) return;
+        const iframe = findEmailIframeElement(e.source);
+        if (iframe) {
+            attachFullscreenToggle(iframe);
+            try {
+                e.source.postMessage({ type: SCP_PONG_TYPE }, "https://planview.lightning.force.com");
+            } catch (err) { /* ignore */ }
+        }
+    });
+
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+            const fsIframe = document.querySelector("iframe.scp-email-iframe-fullscreen");
+            if (fsIframe) exitFullscreen(fsIframe);
+        }
+    });
+
+    function findEmailIframeElement(sourceWindow) {
+        const stack = [document.documentElement];
+        let safety = 50000;
+        while (stack.length && safety-- > 0) {
+            const node = stack.pop();
+            if (!node) continue;
+            if (node.tagName === "IFRAME") {
+                try {
+                    if (node.contentWindow === sourceWindow) return node;
+                } catch (e) { /* cross-origin - skip */ }
+            }
+            if (node.shadowRoot) {
+                const kids = node.shadowRoot.children;
+                for (let i = 0; i < kids.length; i++) stack.push(kids[i]);
+            }
+            if (node.children) {
+                for (let i = 0; i < node.children.length; i++) stack.push(node.children[i]);
+            }
+        }
+        return null;
+    }
+
+    function attachFullscreenToggle(iframe) {
+        try {
+            if (iframe.style.height === "" || parseInt(iframe.style.height, 10) < 582) {
+                iframe.style.height = "582px";
+            }
+        } catch (e) { /* ignore */ }
+
+        const parentEl = iframe.parentElement;
+        if (!parentEl) return;
+
+        if (parentEl.querySelector(":scope > .scp-fullscreen-toggle")) return;
+
+        if (getComputedStyle(parentEl).position === "static") {
+            parentEl.style.position = "relative";
+        }
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "scp-fullscreen-toggle";
+        btn.title = "Toggle fullscreen email editor (Esc to exit)";
+        btn.innerHTML = "⛶ Fullscreen";
+        btn.addEventListener("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (iframe.classList.contains("scp-email-iframe-fullscreen")) {
+                exitFullscreen(iframe);
+            } else {
+                enterFullscreen(iframe);
+            }
+        });
+        parentEl.appendChild(btn);
+    }
+
+    function enterFullscreen(iframe) {
+        iframe.classList.add("scp-email-iframe-fullscreen");
+        const btn = iframe.parentElement &&
+            iframe.parentElement.querySelector(":scope > .scp-fullscreen-toggle");
+        if (btn) {
+            btn.classList.add("scp-fs-active");
+            btn.innerHTML = "✕ Exit fullscreen";
+        }
+        document.body.style.overflow = "hidden";
+    }
+
+    function exitFullscreen(iframe) {
+        iframe.classList.remove("scp-email-iframe-fullscreen");
+        const btn = iframe.parentElement &&
+            iframe.parentElement.querySelector(":scope > .scp-fullscreen-toggle");
+        if (btn) {
+            btn.classList.remove("scp-fs-active");
+            btn.innerHTML = "⛶ Fullscreen";
+        }
+        document.body.style.overflow = "";
+    }
+})();
