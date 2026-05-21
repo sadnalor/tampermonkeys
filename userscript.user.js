@@ -195,6 +195,7 @@ class ConditionalFormatting {
     if (mutationTarget.hasClass('uiInput')) {
       const firstIframe = mutationTarget.find('iframe');
       if (firstIframe.length > 0) {
+        if (firstIframe[0].classList.contains('scp-email-iframe-fullscreen')) return;
         const selectorForResizing = '#cke_1_contents';
         const divForResizing = $(firstIframe[0])
           .contents()
@@ -2275,6 +2276,37 @@ if (window.location.href.indexOf('/email/htmlbody/htmlbody.jsp') === -1) {
         setTimeout(sendPing, 500);
         setTimeout(sendPing, 1500);
         setTimeout(sendPing, 3000);
+        window.addEventListener('message', function (e) {
+            if (!e.data) return;
+            if (e.data.type === 'scp_fullscreen_entered') {
+                document.documentElement.style.overflow = 'auto';
+                if (document.body) document.body.style.overflow = 'auto';
+                var ckeContents = document.getElementById('cke_1_contents');
+                if (ckeContents) {
+                    var toolbar = document.querySelector('.cke_top');
+                    var availableH = window.innerHeight - (toolbar ? toolbar.offsetHeight : 0);
+                    ckeContents._scpOrigH   = ckeContents.style.height;
+                    ckeContents._scpOrigOvf = ckeContents.style.overflow;
+                    ckeContents.style.height   = availableH + 'px';
+                    ckeContents.style.overflow = 'hidden';
+                    var inner = ckeContents.querySelector('iframe');
+                    if (inner) {
+                        inner._scpOrigH    = inner.style.height;
+                        inner.style.height = availableH + 'px';
+                    }
+                }
+            } else if (e.data.type === 'scp_fullscreen_exited') {
+                document.documentElement.style.overflow = '';
+                if (document.body) document.body.style.overflow = '';
+                var ckeContents = document.getElementById('cke_1_contents');
+                if (ckeContents) {
+                    ckeContents.style.height   = ckeContents._scpOrigH   || '';
+                    ckeContents.style.overflow = ckeContents._scpOrigOvf || '';
+                    var inner = ckeContents.querySelector('iframe');
+                    if (inner) inner.style.height = inner._scpOrigH || '';
+                }
+            }
+        });
         return;
     }
 
@@ -2363,6 +2395,16 @@ if (window.location.href.indexOf('/email/htmlbody/htmlbody.jsp') === -1) {
             btn.innerHTML = "✕ Exit fullscreen";
         }
         document.body.style.overflow = "hidden";
+        try {
+            const doc = iframe.contentDocument || iframe.contentWindow.document;
+            if (doc) {
+                iframe._scpPrevDocOverflow = doc.documentElement.style.overflow;
+                iframe._scpPrevBodyOverflow = doc.body ? doc.body.style.overflow : '';
+                doc.documentElement.style.overflow = 'auto';
+                if (doc.body) doc.body.style.overflow = 'auto';
+            }
+        } catch (e) { /* cross-origin guard */ }
+        try { iframe.contentWindow.postMessage({ type: 'scp_fullscreen_entered' }, '*'); } catch (e) {}
     }
 
     function exitFullscreen(iframe) {
@@ -2374,5 +2416,13 @@ if (window.location.href.indexOf('/email/htmlbody/htmlbody.jsp') === -1) {
             btn.innerHTML = "⛶ Fullscreen";
         }
         document.body.style.overflow = "";
+        try {
+            const doc = iframe.contentDocument || iframe.contentWindow.document;
+            if (doc) {
+                doc.documentElement.style.overflow = iframe._scpPrevDocOverflow || '';
+                if (doc.body) doc.body.style.overflow = iframe._scpPrevBodyOverflow || '';
+            }
+        } catch (e) { /* cross-origin guard */ }
+        try { iframe.contentWindow.postMessage({ type: 'scp_fullscreen_exited' }, '*'); } catch (e) {}
     }
 })();
