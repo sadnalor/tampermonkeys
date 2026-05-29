@@ -12,7 +12,6 @@
 // @include      /.*planview--partialsb.sandbox.lightning.force.*/
 //
 // @connect      whoslookingatcases.herokuapp.com
-// @connect      servicecloudpremium-781150c5a240.herokuapp.com
 // @connect      tam-04a6caab6366.herokuapp.com
 // @connect      file.force.com
 // @connect      my.salesforce.com
@@ -951,7 +950,8 @@ class WhosLooking {
         };
         this.callDetails = {
           method: 'POST',
-          url: 'http://servicecloudpremium-781150c5a240.herokuapp.com/whosLookingStatusUpdate',
+          url: 'http://tam-04a6caab6366.herokuapp.com/whosLookingStatusUpdate',
+          headers: { 'Content-Type': 'application/json' },
           data: JSON.stringify(this.payload),
           onload: this.updateUI,
         };
@@ -962,7 +962,7 @@ class WhosLooking {
   };
 
   updateUI = (response) => {
-    if (response.status == 200) {
+    if (response.status == 201) {
       GLOBAL.whosLookingResponse = {
         response: JSON.parse(response.response),
         timestamp: Date.now(),
@@ -1614,8 +1614,7 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;"PVC" id support for Jason's team</li><br>
-          <li>&bull;&nbsp;Color updates on the new statuses</li><br>
+          <li>&bull;&nbsp;Moved to new server</li><br>
         </ul>
         <br>
   
@@ -2071,7 +2070,7 @@ const GLOBAL = {
   imageContainerDiv: null,
   fileLinks: null,
   fileTabCloseButton: null,
-  version: 'v20251211',
+  version: 'v20260529',
 };
 
 //entry function
