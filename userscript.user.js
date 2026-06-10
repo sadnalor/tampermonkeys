@@ -1616,9 +1616,7 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;Added fullscreen popup feature for SF email editor</li><br>
-          <li>&bull;&nbsp;"PVC" id support for Jason's team</li><br>
-          <li>&bull;&nbsp;Color updates on the new statuses</li><br>
+          <li>&bull;&nbsp;Added fullscreen popup feature for SF email editor</li>
         </ul>
         <br>
   
