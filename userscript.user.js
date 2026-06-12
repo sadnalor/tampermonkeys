@@ -80,6 +80,22 @@ class ConditionalFormatting {
     this.textMatchStyles = JSON.parse(
       GLOBAL.settingsManager.settings.textMatchStyles,
     );
+    const customRules = JSON.parse(
+      GLOBAL.settingsManager.settings.customTextMatchStyles || '[]'
+    );
+    for (const rule of customRules) {
+      const idx = this.textMatchStyles.findIndex(s => s.text === rule.text);
+      if (idx >= 0) {
+        this.textMatchStyles[idx] = { ...this.textMatchStyles[idx], ...rule };
+      } else {
+        this.textMatchStyles.push({
+          exactMatch: true,
+          ancestorToHighlight: [],
+          highlightIfAncestorNotFound: true,
+          ...rule,
+        });
+      }
+    }
     //this.displayTimeSpent();
     this.textHighlightColorMap = this.calculateTextHighlightColorMap();
     this.textValuesToMonitor = Object.keys(this.textHighlightColorMap);
@@ -429,13 +445,13 @@ class ConditionalFormatting {
   supportScoreHighlight = (elToHighlight, score) => {
     let number = isNaN(parseFloat(score)) ? 0 : parseFloat(score);
     if (number > GLOBAL.settingsManager.settings.ssRedThreshold) {
-      elToHighlight.css('background-color', '#ea9999');
+      elToHighlight.css('background-color', GLOBAL.settingsManager.settings.ssRedColor);
     } else if (number > GLOBAL.settingsManager.settings.ssOrangeThreshold) {
-      elToHighlight.css('background-color', '#f5b799');
+      elToHighlight.css('background-color', GLOBAL.settingsManager.settings.ssOrangeColor);
     } else if (number > GLOBAL.settingsManager.settings.ssYellowThreshold) {
-      elToHighlight.css('background-color', '#ffe599');
+      elToHighlight.css('background-color', GLOBAL.settingsManager.settings.ssYellowColor);
     } else {
-      elToHighlight.css('background-color', '#d9ead3');
+      elToHighlight.css('background-color', GLOBAL.settingsManager.settings.ssGreenColor);
     }
   };
 
@@ -1313,11 +1329,16 @@ class SettingsManager {
       ssRedThreshold: 90,
       ssOrangeThreshold: 80,
       ssYellowThreshold: 70,
+      ssRedColor: '#ea9999',
+      ssOrangeColor: '#f5b799',
+      ssYellowColor: '#ffe599',
+      ssGreenColor: '#d9ead3',
       overrideStandardFeedFont: false,
       customFeedFont: '',
       feedFontFamily: 'Sans-Serif',
       feedFontSize: '12',
       hideEmptyMilestones: true,
+      customTextMatchStyles: JSON.stringify([]),
     };
     this.run();
   }
@@ -1501,7 +1522,17 @@ class UIinjector {
             -webkit-border-radius: 3px;
             -moz-border-radius: 3px;
             padding: 7px;
+            height: 30px;
             outline: none;
+        }
+        input[type="color"].ss-color-picker,
+        input[type="color"].custom-rule-field {
+            height: 30px;
+            width: 30px;
+            padding: 2px;
+            box-sizing: border-box;
+            vertical-align: middle;
+            cursor: pointer;
         }
         .roland-ui-mods-form .roland-ui-mods-input-field:focus,
         .roland-ui-mods-form .roland-ui-mods-textarea-field:focus {
@@ -1616,8 +1647,8 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;"PVC" id support for Jason's team</li><br>
-          <li>&bull;&nbsp;Color updates on the new statuses</li><br>
+          <li>&bull;&nbsp;Custom color support added</li><br>
+          
         </ul>
         <br>
   
@@ -1632,13 +1663,31 @@ class UIinjector {
           <label><span>Use CTRL+Q to close all tabs</span><input class="roland-ui-mods-settings-input" data-id="closeAllTabsUsingCtrlQ" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.closeAllTabsUsingCtrlQ) ? 'checked' : ''}/></label>
           <label><span>Use CTRL+I to open all images</span><input class="roland-ui-mods-settings-input" data-id="openAllImagesUsingCtrlI" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.openAllImagesUsingCtrlI) ? 'checked' : ''}/></label>
           <label><span>Hyperlink URLs when possible</span><input class="roland-ui-mods-settings-input" data-id="allUrlHyperlinkingBeta" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.allUrlHyperlinkingBeta) ? 'checked' : ''}/></label>
-          <label><span>Support Score red threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssRedThreshold" value="${GLOBAL.settingsManager.settings.ssRedThreshold}"/></label>
-          <label><span>Support Score orange threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssOrangeThreshold" value="${GLOBAL.settingsManager.settings.ssOrangeThreshold}"/></label>
-          <label><span>Support Score yellow threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssYellowThreshold" value="${GLOBAL.settingsManager.settings.ssYellowThreshold}"/></label>
+          <label><span>Support Score red threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssRedThreshold" value="${GLOBAL.settingsManager.settings.ssRedThreshold}"/><input type="color" class="ss-color-picker" data-id="ssRedColor" value="${GLOBAL.settingsManager.settings.ssRedColor || '#ea9999'}" style="cursor:pointer;margin-left:6px;vertical-align:middle;"/><input type="text" maxlength="9" class="roland-ui-mods-input-field roland-ui-mods-settings-input ss-color-text" data-id="ssRedColor" value="${GLOBAL.settingsManager.settings.ssRedColor || '#ea9999'}" style="width:72px;"/></label>
+          <label><span>Support Score orange threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssOrangeThreshold" value="${GLOBAL.settingsManager.settings.ssOrangeThreshold}"/><input type="color" class="ss-color-picker" data-id="ssOrangeColor" value="${GLOBAL.settingsManager.settings.ssOrangeColor || '#f5b799'}" style="cursor:pointer;margin-left:6px;vertical-align:middle;"/><input type="text" maxlength="9" class="roland-ui-mods-input-field roland-ui-mods-settings-input ss-color-text" data-id="ssOrangeColor" value="${GLOBAL.settingsManager.settings.ssOrangeColor || '#f5b799'}" style="width:72px;"/></label>
+          <label><span>Support Score yellow threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssYellowThreshold" value="${GLOBAL.settingsManager.settings.ssYellowThreshold}"/><input type="color" class="ss-color-picker" data-id="ssYellowColor" value="${GLOBAL.settingsManager.settings.ssYellowColor || '#ffe599'}" style="cursor:pointer;margin-left:6px;vertical-align:middle;"/><input type="text" maxlength="9" class="roland-ui-mods-input-field roland-ui-mods-settings-input ss-color-text" data-id="ssYellowColor" value="${GLOBAL.settingsManager.settings.ssYellowColor || '#ffe599'}" style="width:72px;"/></label>
+          <label><span>Support Score green (default) color</span><input type="color" class="ss-color-picker" data-id="ssGreenColor" value="${GLOBAL.settingsManager.settings.ssGreenColor || '#d9ead3'}" style="cursor:pointer;vertical-align:middle;"/><input type="text" maxlength="9" class="roland-ui-mods-input-field roland-ui-mods-settings-input ss-color-text" data-id="ssGreenColor" value="${GLOBAL.settingsManager.settings.ssGreenColor || '#d9ead3'}" style="width:72px;"/></label>
           <label><span>Override standard feed font (<span style="text-decoration: underline; color: blue;" title='If disabled, below feed font settings will not be applied.'>info</span>)</span><input class="roland-ui-mods-settings-input" data-id="overrideStandardFeedFont" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.overrideStandardFeedFont) ? 'checked' : ''}/></label>
           <label><span>Custom feed font (<span style="text-decoration: underline; color: blue;" title='If a valid and available font is entered it will be used instead of the below feed font selected in the picklist.'>info</span>)</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="customFeedFont" value="${GLOBAL.settingsManager.settings.customFeedFont}"/></label>
           <label><span>Feed font (<span style="text-decoration: underline; color: blue;" title='This will be used if custom feed font is blank'>info</span>)</span><div style='display:inline-block;'><div>${this.feedFontSelectorHTML(GLOBAL.settingsManager.settings.feedFontFamily)}</div><div id='abcxyz' style='padding-top:10px;font-family:${GLOBAL.settingsManager.settings.feedFontFamily};'>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789</div></div></label>
           <label><span>Feed font size</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="feedFontSize" value="${GLOBAL.settingsManager.settings.feedFontSize}"/></label>
+
+          <div class="roland-ui-mods-form-heading" style="margin-top:12px;">Custom Color Rules</div>
+          <p style="font-size:11px;color:#555;margin:4px 0 8px;">Add custom text → color mappings. Matching text overrides the default color; new text is added as a new rule. "Exact" means the full cell text must equal the value.</p>
+          <table id="custom-color-rules-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:4px 6px;">Text to match</th>
+                <th style="text-align:left;padding:4px 6px;">Background</th>
+                <th style="text-align:left;padding:4px 6px;">Text Color</th>
+                <th style="text-align:left;padding:4px 6px;">Exact</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="custom-color-rules-body"></tbody>
+          </table>
+          <button type="button" id="add-custom-color-rule" style="margin-top:6px;cursor:pointer;">+ Add Rule</button>
+          <textarea style="display:none;" class="roland-ui-mods-settings-input" data-id="customTextMatchStyles" id="custom-color-rules-json">${JSON.stringify(JSON.parse(GLOBAL.settingsManager.settings.customTextMatchStyles || '[]'))}</textarea>
         </form>
       </div>`; //<label><span>Text match styles</span><textarea class="roland-ui-mods-textarea-field  roland-ui-mods-settings-input" data-id="textMatchStyles">${JSON.stringify(JSON.parse(GLOBAL.settingsManager.settings.textMatchStyles), undefined, 4)}</textarea></label>
   };
@@ -1663,6 +1712,52 @@ class UIinjector {
     return `<option value="${font.name}" ${font.selected ? `selected ="selected"` : ``}>${font.name}</option>`;
   };
 
+  customColorRuleRowHTML = (rule = {}) => {
+    const bg = rule.bgColor || '#ffffff';
+    const tc = rule.textColor || '#000000';
+    const exact = rule.exactMatch !== false;
+    return `<tr class="custom-rule-row">
+      <td style="padding:3px 4px;"><input type="text" value="${rule.text || ''}" placeholder="e.g. Active" class="roland-ui-mods-input-field custom-rule-field" data-col="text" style="width:140px;"/></td>
+      <td style="padding:3px 4px;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <input type="color" value="${bg}" class="custom-rule-field" data-col="bgColor" style="cursor:pointer;"/>
+          <input type="text" value="${bg}" maxlength="9" class="roland-ui-mods-input-field custom-rule-field" data-col="bgColor" style="width:72px;"/>
+        </div>
+      </td>
+      <td style="padding:3px 4px;">
+        <input type="color" value="${tc}" class="custom-rule-field" data-col="textColor" style="cursor:pointer;"/>
+        <input type="text" value="${tc}" maxlength="9" class="roland-ui-mods-input-field custom-rule-field" data-col="textColor" style="width:72px;"/>
+      </td>
+      <td style="padding:3px 4px;text-align:center;"><input type="checkbox" class="custom-rule-field" data-col="exactMatch" ${exact ? 'checked' : ''}/></td>
+      <td style="padding:3px 4px;"><button type="button" class="delete-custom-rule" style="color:red;cursor:pointer;background:none;border:none;font-size:14px;">✕</button></td>
+    </tr>`;
+  };
+
+  serializeCustomRules = () => {
+    const rules = [];
+    $('#custom-color-rules-body .custom-rule-row').each((_, row) => {
+      const text = $(row).find('[data-col="text"]').first().val().trim();
+      if (!text) return;
+      rules.push({
+        text,
+        bgColor: $(row).find('input[type="text"][data-col="bgColor"]').val(),
+        textColor: $(row).find('input[type="text"][data-col="textColor"]').val(),
+        exactMatch: $(row).find('[data-col="exactMatch"]').is(':checked'),
+      });
+    });
+    $('#custom-color-rules-json').val(JSON.stringify(rules));
+  };
+
+  renderCustomRulesTable = () => {
+    let stored = '[]';
+    try { stored = $('#custom-color-rules-json').val() || '[]'; } catch(e) {}
+    const rules = JSON.parse(stored);
+    $('#custom-color-rules-body').empty();
+    rules.forEach(rule => {
+      $('#custom-color-rules-body').append(this.customColorRuleRowHTML(rule));
+    });
+  };
+
   injectSettingsButton = (retrying) => {
     let headerFirstChild = $('div.slds-global-header > div:nth-child(1)');
     if (headerFirstChild.length > 0) {
@@ -1685,6 +1780,7 @@ class UIinjector {
         .off('click', '#roland-ui-mods-settings-button')
         .on('click', '#roland-ui-mods-settings-button', (e) => {
           this.settingsButtonClicked(e);
+          setTimeout(() => this.renderCustomRulesTable(), 80);
         });
       $(document)
         .off('click', '#roland-ui-mods-timesheets-button')
@@ -1715,6 +1811,44 @@ class UIinjector {
         .on('click', '#feed-font-selector', (e) => {
           $('#abcxyz').css('fontFamily', e.target.value);
         });
+
+      $(document)
+        .off('click', '#add-custom-color-rule')
+        .on('click', '#add-custom-color-rule', () => {
+          $('#custom-color-rules-body').append(this.customColorRuleRowHTML());
+        });
+
+      $(document)
+        .off('click', '.delete-custom-rule')
+        .on('click', '.delete-custom-rule', (e) => {
+          $(e.target).closest('tr').remove();
+          this.serializeCustomRules();
+        });
+
+      $(document)
+        .off('change input', '.custom-rule-field')
+        .on('change input', '.custom-rule-field', (e) => {
+          const row = $(e.target).closest('tr');
+          const col = $(e.target).data('col');
+          if ($(e.target).is('input[type="color"]')) {
+            row.find(`input[type="text"][data-col="${col}"]`).val($(e.target).val());
+          } else if ((col === 'bgColor' || col === 'textColor') && $(e.target).is('input[type="text"]')) {
+            row.find(`input[type="color"][data-col="${col}"]`).val($(e.target).val());
+          }
+          this.serializeCustomRules();
+        });
+
+      $(document)
+        .off('change input', '.ss-color-picker, .ss-color-text')
+        .on('change input', '.ss-color-picker, .ss-color-text', (e) => {
+          const id = $(e.target).data('id');
+          if ($(e.target).is('input[type="color"]')) {
+            $(`.ss-color-text[data-id="${id}"]`).val($(e.target).val());
+          } else {
+            $(`.ss-color-picker[data-id="${id}"]`).val($(e.target).val());
+          }
+        });
+
       document.addEventListener('mousemove', this.saveMouseMovementTime, false);
       document.addEventListener('keydown', this.saveKeypressTime);
     });
