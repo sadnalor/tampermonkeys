@@ -1617,7 +1617,7 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;Added fullscreen popup feature for SF email editor</li>
+          <li>&bull;&nbsp;Fixed CTRL-Q close all tabs functionality</li>
         </ul>
         <br>
   
@@ -1838,7 +1838,7 @@ class UIinjector {
 
   closeTabs = () => {
     let buttons = $(
-      `button.slds-button.slds-button_icon.slds-button_icon-x-small.slds-button_icon-container[title^="Close "]`,
+      `button.slds-button.slds-button_icon.slds-button_icon-small.slds-button_icon-container[title^="Close "]`,
     );
     if (buttons.length > 0) {
       buttons.click();
