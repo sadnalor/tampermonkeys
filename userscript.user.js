@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.06.10.0
+// @version      2026.06.26.0
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -2209,7 +2209,7 @@ const GLOBAL = {
   imageContainerDiv: null,
   fileLinks: null,
   fileTabCloseButton: null,
-  version: 'v20260610',
+  version: 'v2026.06.26.0',
 };
 
 //entry function
