@@ -254,7 +254,11 @@ class ConditionalFormatting {
 
   monitorActiveCaseWhenUrlChanges = () => {
     if (window.location.pathname != GLOBAL.pathname) {
+
+      console.log('URL change');
+      GLOBAL.uiInjector.injectHideLeftColumnButton();
       GLOBAL.pathname = window.location.pathname;
+
       let pathNameArray = GLOBAL.pathname.split('/');
       if (pathNameArray.length > 4) {
         if (pathNameArray[3].toLowerCase() == 'case') {
@@ -350,7 +354,7 @@ class ConditionalFormatting {
       if (GLOBAL.settingsManager.settings.allUrlHyperlinkingBeta)
         this.allUrlHyperlinking(textNode);
       this.findFilesSection(textNode);
-      this.findEscalatedToT3OrDevWarning(textNode);
+      // this.findEscalatedToT3OrDevWarning(textNode);
       this.supportScoreHighlightInPanels(textNode);
       this.supportScoreInTableHighlighting(textNode);
       this.escalationLevelHighlightingInLists(textNode);
@@ -415,6 +419,7 @@ class ConditionalFormatting {
     }
   };
 
+/*
   querySelectorDeep(selector, root) {
     let currentRoot = root;
     let partials = selector.split('::shadow');
@@ -433,11 +438,13 @@ class ConditionalFormatting {
     }
     return elems;
   }
+*/
 
   tryToHighlightSupportScoreInHighlightsPanel = (textNode) => {
     this.supportScoreHighlight(
       $(textNode.parentNode.parentNode),
-      this.querySelectorDeep(`slot`, textNode.parentNode.parentNode)?.[0]
+      // this.querySelectorDeep(`slot`, textNode.parentNode.parentNode)?.[0]
+      deepQuerySelector(`slot`, textNode.parentNode.parentNode)?.[0]
         ?.innerText,
     );
   };
@@ -455,6 +462,9 @@ class ConditionalFormatting {
     }
   };
 
+/*
+ * This DEV on is no longer in use and has been replaced by a screen flow
+ *
   findEscalatedToT3OrDevWarning = (textNode) => {
     if (
       textNode.textContent ==
@@ -466,6 +476,9 @@ class ConditionalFormatting {
       $('span.title:contains("Post")').click();
     }
   };
+*
+*/
+
 
   findFilesSection = (textNode) => {
     if (textNode.textContent == 'Files') {
@@ -1401,11 +1414,124 @@ class UIinjector {
     this.userName = null;
     this.addStyles();
     this.uiEvents();
+    this.injectHideLeftColumnButton();
     this.whosLookingText = null;
     this.whosLookingResponseTimestamp = null;
     this.chatLoader = null;
     this.environment = 'prd';
   }
+
+
+  injectHideLeftColumnButton = (count = 0) => {
+
+    console.log('injectHideLeftColumnButton');
+
+    // Check if the button is already there and abort if so.
+    // By default, deepQuerySelector only finds visible elements and thus will not be fooled
+    // if the button already exists in some other, hidden tabs
+    if( deepQuerySelector('#roland_hideLeftColumnButton') != null) return;
+    if( deepQuerySelector('#roland_showLeftColumnButton') != null) return;
+
+    // Check if we're on a 3 column page
+    let recordHome = deepQuerySelector('flexipage-record-home-three-col-template-desktop2');
+
+    // The following searches should be very fast as they start in the record page and don't search the entire document.
+    // Even without the sliding effect, we'd need to modify css on all these elements to hide the left column
+    let highlights=   (recordHome == null) ? null : deepQuerySelector('div.highlights > div > div.slds-grid.slds-col.slds-has-flexi-truncate', recordHome.children);
+    let leftColumn=   (recordHome == null) ? null : deepQuerySelector('flexipage-record-home-scrollable-column.col.left-col.slds-col', recordHome.children);
+    let middleColumn= (recordHome == null) ? null : deepQuerySelector('flexipage-record-home-scrollable-column.col.main-col.slds-col', recordHome.children);
+    let rightColumn=  (recordHome == null) ? null : deepQuerySelector('flexipage-record-home-scrollable-column.col.right-col.slds-col', recordHome.children);
+    let groupDiv=     (recordHome == null) ? null : deepQuerySelector('div.grouping', recordHome.children);
+
+    // if we don't have all required components rendered yet, check back a bit later
+    if( highlights == null || groupDiv == null ||leftColumn == null || middleColumn == null || rightColumn == null) {
+      if (count < 10) {
+         setTimeout(() => {
+           this.injectHideLeftColumnButton(count + 1);
+         }, 500);
+      }
+    } else
+    {
+       let butHide=this.hideLeftColumnButtonTemplate(true, true);
+       let butShow=this.hideLeftColumnButtonTemplate(false, false);
+
+       let el = { "highlights"  : highlights[0],
+                  "butShow"     : butShow,
+                  "butHide"     : butHide,
+                  "leftColumn"  : leftColumn[0],
+                  "middleColumn": middleColumn[0],
+                  "rightColumn" : rightColumn[0],
+                  "groupDiv"    : groupDiv[0] };
+
+       butShow.addEventListener('click', (e) => { this.setLeftColumnWidth(el, 5, 25, 1)});
+       butHide.addEventListener('click', (e) => { this.setLeftColumnWidth(el, 20,0,-1)});
+
+       highlights[0].insertBefore(butHide, highlights[0].firstChild);
+       highlights[0].insertBefore(butShow, highlights[0].firstChild);
+
+       if(GLOBAL.hideLeftColumn) this.setLeftColumnWidth(el, 0, 0, 0);
+    }
+  }
+
+
+//
+// Set the width of the left column and adjust other involved elements accordingly
+// Hide the left column when the width reaches 0
+// input el: the elemenst involved
+//      curpct: current percentage to set
+//     destpct: destination percentage
+//        incr: increment for each step of the slide
+//
+setLeftColumnWidth= (el, curpct, destpct, incr ) => {
+
+     // make sure current percentage remains between 0 and destination percentage
+     curpct= (incr > 0 && curpct > destpct) ? destpct : curpct;
+     curpct= (incr < 0 && curpct < 0)       ? 0 : curpct;
+
+     // remember if we should default to left column hidden when the next window is opened
+     GLOBAL.hideLeftColumn = (curpct == 0);
+
+     el.butShow.style.display   = (curpct == 0) ? "block" : "none";
+     el.butHide.style.display   = (curpct == 0) ? "none" : "block";
+     el.leftColumn.style.display= (curpct == 0) ? "none" : "block";
+
+     el.groupDiv.style.width    =  (100-curpct) +'%';
+     el.leftColumn.style.width  =  curpct +'%';
+     el.middleColumn.style.width=  (100-curpct)*3/4 +'%';
+     el.rightColumn.style.width =  (100-curpct)/4 +'%';
+
+     // forces a resiz of the highlights buttonbar
+     window.dispatchEvent(new Event('resize'));
+
+     // if an increment is specified and destination percentage not reached
+     // do another iteration
+     if (incr != 0 && curpct != destpct) {
+        setTimeout(() => {
+            this.setLeftColumnWidth(el, curpct + incr, destpct, incr);
+            }, 50);
+     }
+}
+
+
+//
+// Returns a left column collapse or expand button
+// Not as string but as object so we can add an event handler
+//
+hideLeftColumnButtonTemplate = (hide, display) => {
+    let but= document.createElement('button');
+    but.id= hide ? 'roland_hideLeftColumnButton' : 'roland_showLeftColumnButton';
+    but.style= `display: ${display ? 'block' : 'none'}; border: none; padding-left: 0px`;
+    but.title= hide ? 'Hide left column' : 'Show left column';
+    but.border='none';
+    but.innerHTML=`<svg focusable="false" viewBox="0 0 520 520" part="icon"  class="slds-button__icon">
+                      <path d="${hide ? 'M380 83v354c0 10-13 17-22 9L146 273c-8-6-8-19 0-25L358 73c9-7 22-1 22 10'
+                                      : 'M146 83v354c0 10 13 17 22 9L380 273c8-6 8-19 0-25L168 73c-9-7-22-1-22 10'}" >
+                      </path>
+                   </svg>`
+
+    return but;
+};
+
 
   addStyles = () => {
     GM_addStyle(GM_getResourceText('popupStyleCSS'));
@@ -1648,9 +1774,7 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;Custom color support added</li><br>
-          
-          <li>&bull;&nbsp;Fixed CTRL-Q close all tabs functionality</li>
+          <li>&bull;&nbsp;Added functionality to hide the left column on the case page</li><br>
         </ul>
         <br>
   
@@ -2209,7 +2333,8 @@ const GLOBAL = {
   imageContainerDiv: null,
   fileLinks: null,
   fileTabCloseButton: null,
-  version: 'v2026.06.26.0',
+  hideLeftColumn: false,
+  version: 'v2026.07.03.0',
 };
 
 //entry function
@@ -2237,6 +2362,41 @@ const rolandUImods = () => {
 };
 
 //global functions
+
+//
+// determine if a control is effectively visible or not
+//
+function isVisible(element) {
+  const style = getComputedStyle(element);
+  return style.display !== "none" &&
+         style.visibility !== "hidden" &&
+         element.offsetParent !== null;
+}
+
+
+//
+// recursively traverse dom & shadow dom
+// can filter on visible elements only, to avoid finding elements
+// in other, hidden tabs
+//
+function deepQuerySelector(selector, root = document, visibleOnly= true) {
+  //console.log('select ' + selector + ' in ' + root.id);
+
+  let allFound = [...root.querySelectorAll(selector)];
+  if(visibleOnly) allFound= allFound.filter(el => isVisible(el) );
+
+  for (const el of root.querySelectorAll('*')) {
+    if (el.shadowRoot) {
+      if( !visibleOnly || isVisible(el)) {
+        const result = deepQuerySelector(selector, el.shadowRoot, visibleOnly);
+        if (result) allFound.push(...result);
+      }
+    }
+  }
+
+  return allFound.length > 0 ? allFound : null;
+}
+
 
 const refreshLists = () => {
   if (!isNaN(parseFloat(GLOBAL.settingsManager.settings.listRefreshRate))) {
