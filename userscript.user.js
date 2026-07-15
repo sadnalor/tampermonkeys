@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.07.07.0
+// @version      2026.07.15.0
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -1815,7 +1815,8 @@ class UIinjector {
 
   headerButtonsTemplate = () => {
     //return `<div id="roland-ui-mods-header-buttons">${this.settingsButtonTemplate()}${this.chatButtonTemplate()}</div>`;
-    return `<div id="roland-ui-mods-header-buttons">${this.settingsButtonTemplate()}${this.timesheetsButtonTemplate()}</div>`;
+    //return `<div id="roland-ui-mods-header-buttons">${this.settingsButtonTemplate()}${this.timesheetsButtonTemplate()}</div>`;
+    return `<div id="roland-ui-mods-header-buttons">${this.settingsButtonTemplate()}</div>`;
   };
 
   settingsMenuTemplate = () => {
@@ -1964,7 +1965,7 @@ class UIinjector {
         .off('click', '#roland-ui-mods-timesheets-button')
         .on('click', '#roland-ui-mods-timesheets-button', (e) => {
           window.open(
-            'https://tam-04a6caab6366.herokuapp.com/timesheets',
+            'https://tam-04a6caab6366.herokuapp.com/timesheetsNew',
             '_blank',
           );
         });
@@ -2393,7 +2394,7 @@ const GLOBAL = {
   fileLinks: null,
   fileTabCloseButton: null,
   hideLeftColumn: false,
-  version: 'v2026.07.07.0',
+  version: 'v2026.07.15.0',
 };
 
 //entry function
