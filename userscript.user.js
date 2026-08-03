@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.07.31.01
+// @version      2026.08.03.01
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -1770,9 +1770,15 @@ class UIinjector {
             ? secondsAgo / secondsTo20percentOpacity
             : 1);
 
-      if(record.name.startsWith('##info##')) {
-          if(secondsAgo < secondsToShow) {
-            modders += (modders != '' ? '<br/>' : '') + record.name.slice(8) + ' ' + secondsAgo + 's ago';
+      if (record.name.startsWith('##info##')) {
+          if (secondsAgo < secondsToShow) {
+            let timeAgoDisplay =
+              secondsAgo < 10
+                ? `${secondsAgo}s ago`
+                : (secondsAgo < 121
+                ? `${Math.floor(secondsAgo / 10) * 10}s ago`
+                : 'recently');
+            modders += (modders != '' ? '<br/>' : '') + record.name.slice(8) + ' ' + timeAgoDisplay;
           }
       }
       else {
