@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.07.15.0
+// @version      2026.08.03.01
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -10,6 +10,7 @@
 // @include      /.*planview--trident.sandbox.lightning.force.*/
 // @include      /.*planview--partialsb.lightning.force.*/
 // @include      /.*planview--partialsb.sandbox.lightning.force.*/
+// @include      /.*planview--bizappspro.sandbox.lightning.force.*/
 // @include      /.*planview.my.salesforce.com\/email\/htmlbody\/htmlbody.jsp.*/
 //
 // @connect      whoslookingatcases.herokuapp.com
@@ -33,6 +34,7 @@
 // @downloadURL  https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
 // @updateURL    https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
 // ==/UserScript==
+
 
 class MutationObserverRegistry {
   constructor(observerName) {
@@ -254,7 +256,7 @@ class ConditionalFormatting {
 
   monitorActiveCaseWhenUrlChanges = () => {
     if (window.location.pathname != GLOBAL.pathname) {
-      console.log('URL change');
+      //console.log('URL change');
       GLOBAL.uiInjector.injectHideLeftColumnButton();
       GLOBAL.pathname = window.location.pathname;
 
@@ -972,7 +974,8 @@ class WhosLooking {
         GLOBAL.mouseMovedOn &&
         (GLOBAL.activeCaseId != this.caseIdSent ||
           GLOBAL.mouseMovedOn != this.lastMouseActivitySent ||
-          GLOBAL.keyPressedOn != this.lastKeyboardActivitySent)
+          GLOBAL.keyPressedOn != this.lastKeyboardActivitySent ||
+          Date.now() - GLOBAL.whosLookingResponse.timestamp > 10000) // occasionlay check even if there was no user activity
       ) {
         // GLOBAL.userName
         let lastActivityTimestamp = GLOBAL.keyPressedOn
@@ -1635,6 +1638,10 @@ class UIinjector {
         .roland-hide{
             opacity: 0;
         }
+        .thomas-ui-mods-modders-indicator {
+           padding-left: 8px;
+           color: red;
+        }
         @-webkit-keyframes mercuryTypingAnimation{
         0%{
         -webkit-transform:translateY(0px)
@@ -1743,9 +1750,15 @@ class UIinjector {
 
   injectWhosLookingIndicator = () => {
     let feedActions = $('div.feedActions.slds-grid');
+
     $('.roland-ui-mods-whoslooking-indicator').remove();
-    for (let i in GLOBAL.whosLookingResponse.response) {
-      let record = GLOBAL.whosLookingResponse.response[i];
+    $('.thomas-ui-mods-modders-indicator').remove();
+
+    let lookers='';  // those who look (classic whoslooking)
+    let modders='';  // those who modify the case otherwise
+
+    for (const record of GLOBAL.whosLookingResponse.response.sort(
+              (a, b) => b.lastActivityTimestamp - a.lastActivityTimestamp )) {
       let secondsAgo =
         ~~(Date.now() / 1000) - ~~(record.lastActivityTimestamp / 1000);
       let secondsTo20percentOpacity = 100;
@@ -1756,7 +1769,20 @@ class UIinjector {
           (secondsAgo / secondsTo20percentOpacity < 1
             ? secondsAgo / secondsTo20percentOpacity
             : 1);
-      feedActions.prepend(
+
+      if (record.name.startsWith('##info##')) {
+          if (secondsAgo < secondsToShow) {
+            let timeAgoDisplay =
+              secondsAgo < 10
+                ? `${secondsAgo}s ago`
+                : (secondsAgo < 121
+                ? `${Math.floor(secondsAgo / 10) * 10}s ago`
+                : 'recently');
+            modders += (modders != '' ? '<br/>' : '') + record.name.slice(8) + ' ' + timeAgoDisplay;
+          }
+      }
+      else {
+        lookers +=
         this.whosLookingIndicatorTemplate({
           title: `${record.name} was active on this case ${secondsAgo}s ago`,
           initials: this.nameToInitials(record.name),
@@ -1764,9 +1790,12 @@ class UIinjector {
           show: secondsToShow < secondsAgo ? false : true,
           isTyping: Date.now() - record.lastKeypressTimestamp < 5000,
           backgroundColor: record.backgroundColor,
-        }),
-      );
+        });
+      }
     }
+
+    if( modders !=='') { feedActions.prepend('<span class="thomas-ui-mods-modders-indicator">'+modders+'</span>'); }
+    if( lookers !=='') { feedActions.prepend(lookers); }
   };
 
   nameToInitials = (name) => {
@@ -1823,7 +1852,7 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;Added functionality to hide the left column on the case page</li><br>
+          <li>&bull;&nbsp;Improved 'Who is looking' functionality to show concurrent updates by other users</li><br>
         </ul>
         <br>
   
@@ -2394,7 +2423,7 @@ const GLOBAL = {
   fileLinks: null,
   fileTabCloseButton: null,
   hideLeftColumn: false,
-  version: 'v2026.07.15.0',
+  version: '2026.07.31.01',
 };
 
 //entry function
