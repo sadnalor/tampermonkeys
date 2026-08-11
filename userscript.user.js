@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.08.03.01
+// @version      2026.08.11.1
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -34,7 +34,6 @@
 // @downloadURL  https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
 // @updateURL    https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
 // ==/UserScript==
-
 
 class MutationObserverRegistry {
   constructor(observerName) {
@@ -1754,11 +1753,12 @@ class UIinjector {
     $('.roland-ui-mods-whoslooking-indicator').remove();
     $('.thomas-ui-mods-modders-indicator').remove();
 
-    let lookers='';  // those who look (classic whoslooking)
-    let modders='';  // those who modify the case otherwise
+    let lookers = ''; // those who look (classic whoslooking)
+    let modders = ''; // those who modify the case otherwise
 
     for (const record of GLOBAL.whosLookingResponse.response.sort(
-              (a, b) => b.lastActivityTimestamp - a.lastActivityTimestamp )) {
+      (a, b) => b.lastActivityTimestamp - a.lastActivityTimestamp,
+    )) {
       let secondsAgo =
         ~~(Date.now() / 1000) - ~~(record.lastActivityTimestamp / 1000);
       let secondsTo20percentOpacity = 100;
@@ -1771,19 +1771,21 @@ class UIinjector {
             : 1);
 
       if (record.name.startsWith('##info##')) {
-          if (secondsAgo < secondsToShow) {
-            let timeAgoDisplay =
-              secondsAgo < 10
-                ? `${secondsAgo}s ago`
-                : (secondsAgo < 121
+        if (secondsAgo < secondsToShow) {
+          let timeAgoDisplay =
+            secondsAgo < 10
+              ? `${secondsAgo}s ago`
+              : secondsAgo < 121
                 ? `${Math.floor(secondsAgo / 10) * 10}s ago`
-                : 'recently');
-            modders += (modders != '' ? '<br/>' : '') + record.name.slice(8) + ' ' + timeAgoDisplay;
-          }
-      }
-      else {
-        lookers +=
-        this.whosLookingIndicatorTemplate({
+                : 'recently';
+          modders +=
+            (modders != '' ? '<br/>' : '') +
+            record.name.slice(8) +
+            ' ' +
+            timeAgoDisplay;
+        }
+      } else {
+        lookers += this.whosLookingIndicatorTemplate({
           title: `${record.name} was active on this case ${secondsAgo}s ago`,
           initials: this.nameToInitials(record.name),
           opacity: opacity,
@@ -1794,8 +1796,14 @@ class UIinjector {
       }
     }
 
-    if( modders !=='') { feedActions.prepend('<span class="thomas-ui-mods-modders-indicator">'+modders+'</span>'); }
-    if( lookers !=='') { feedActions.prepend(lookers); }
+    if (modders !== '') {
+      feedActions.prepend(
+        '<span class="thomas-ui-mods-modders-indicator">' + modders + '</span>',
+      );
+    }
+    if (lookers !== '') {
+      feedActions.prepend(lookers);
+    }
   };
 
   nameToInitials = (name) => {
@@ -2423,7 +2431,7 @@ const GLOBAL = {
   fileLinks: null,
   fileTabCloseButton: null,
   hideLeftColumn: false,
-  version: '2026.07.31.01',
+  version: '2026.08.11.1',
 };
 
 //entry function
