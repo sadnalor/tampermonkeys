@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.08.11.1
+// @version      2026.10.13.01
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -371,9 +371,101 @@ class ConditionalFormatting {
       this.sciformaJiraIdHyperlinkingManyIds(textNode);
       this.generalMessageIsNullHighlighting(textNode);
     }
+
+    // Additional tree walker for hyprlinks
+    if(GLOBAL.settingsManager.settings.shortenAPUrls || GLOBAL.settingsManager.settings.autoExpandPosts) {
+
+      let node_hl,
+         walker_hl = document.createTreeWalker(
+         node,
+         NodeFilter.SHOW_ELEMENT,
+        {
+           acceptNode(node) {
+             return (node.tagName === 'A' && node.hasAttribute('href'))
+               ? NodeFilter.FILTER_ACCEPT
+               : NodeFilter.FILTER_SKIP; // SKIP still visits children; use FILTER_REJECT to prune subtree
+           }
+        }
+      );
+
+      while ((node_hl = walker_hl.nextNode())) {
+              //   console.log('HL WALKER', node);
+         // Change display of AgilePlace links to just show the card number
+         if (GLOBAL.settingsManager.settings.shortenAPUrls && /planview\.leankit\.com\/card\/\d{10}$/.test(node_hl.href)) {
+             if(node_hl.childElementCount === 0)  {
+                 let match = node_hl.href.match(/\/card\/(\d+)/);
+                 if(match){
+                     node_hl.textContent='AP: '+match[1];
+                 }
+             }
+         }
+
+         // Auot select 'Expand post' in internal posts
+         if(node_hl.title == 'Show more text' && node_hl.classList.contains('cuf-more') && node_hl.attributes['TMclickDone'] != 'YESSS' &&  GLOBAL.settingsManager.settings.autoExpandPosts) {
+
+           const previousActiveElement = document.activeElement;
+           let middleColumn = deepQuerySelector('flexipage-record-home-scrollable-column.col.main-col.slds-col', document.body,true );
+
+           if(middleColumn != null) {
+             console.log('Click Expand', node);
+
+             let scrollTop =middleColumn[0].scrollTop;
+             node_hl.click();
+             node_hl.attributes['TMclickDone'] = 'YESSS';
+             this.scrollTopChecker(middleColumn[0], scrollTop, 10);
+             document.activeElement?.blur();
+           }
+         }
+      }
+
+      // Additional tree walker for auto-expand buttons
+      if(GLOBAL.settingsManager.settings.autoExpandPosts) {
+        // console.log('BUT WALKER', node);
+        let node_but,
+            walker_but = document.createTreeWalker(
+              node,
+              NodeFilter.SHOW_ELEMENT,
+              {
+                acceptNode(node) {
+                  return (node.tagName === 'BUTTON' && node.childElementCount === 0 && node.textContent == 'More comments' && node.attributes['TMclickDone'] != 'YESSS')
+                    ? NodeFilter.FILTER_ACCEPT
+                    : NodeFilter.FILTER_SKIP; // SKIP still visits children; use FILTER_REJECT to prune subtree
+                }
+              }
+            );
+
+        while ((node_but = walker_but.nextNode())) {
+          const previousActiveElement = document.activeElement;
+          let middleColumn = deepQuerySelector('flexipage-record-home-scrollable-column.col.main-col.slds-col', document.body,true );
+
+          if(middleColumn != null) {
+             console.log('CLICK MORE COMMENTS', node.attributes['TMclickDone'], node_but,  node);
+
+             let scrollTop = middleColumn[0].scrollTop;
+             node_but.attributes['TMclickDone'] = 'YESSS';
+             node_but.click();
+             this.scrollTopChecker(middleColumn[0], scrollTop, 10);
+          }
+        }
+     }
+   }
+
     const finish = Date.now();
     GLOBAL.totalTimeSpent += finish - start;
   };
+
+ // this waits until scrollTop has changed and then sets it back to the target
+ scrollTopChecker = ( middleColumn, target, count) =>{
+
+     if(GLOBAL.scrollToTop < target) return;
+     GLOBAL.scrollToTop= target;
+
+     console.log('ScrollTopChecker', count, GLOBAL.scrollToTop);
+     let scrollTop= middleColumn.scrollTop;
+     if( scrollTop == target && count > 0) setTimeout( () => { this.scrollTopChecker( middleColumn, target, count -1) }, 150);
+     if( scrollTop != target) { middleColumn.scrollTop = target;  GLOBAL.scrollToTop= 9999999; }
+     if(count == 0) GLOBAL.scrollToTop= 9999999;
+ }
 
   generalMessageIsNullHighlighting = (textNode) => {
     if (textNode.textContent == 'General Message') {
@@ -413,9 +505,6 @@ class ConditionalFormatting {
   supportScoreHighlightInPanels = (textNode) => {
     if (textNode.textContent == 'Support Score') {
       this.tryToHighlightSupportScoreInHighlightsPanel(textNode);
-      let topLevel = $(textNode.parentNode).closest('div.slds-form-element');
-      let numberSpan = topLevel.find('span.uiOutputNumber');
-      this.supportScoreHighlight(topLevel, numberSpan.html());
     }
   };
 
@@ -441,26 +530,29 @@ class ConditionalFormatting {
 */
 
   tryToHighlightSupportScoreInHighlightsPanel = (textNode) => {
-    this.supportScoreHighlight(
-      $(textNode.parentNode.parentNode),
-      // this.querySelectorDeep(`slot`, textNode.parentNode.parentNode)?.[0]
-      deepQuerySelector(`slot`, textNode.parentNode.parentNode)?.[0]?.innerText,
-    );
+
+    const host= textNode?.getRootNode()?.host;
+    if(!host) return;
+
+    const value= host?.querySelector('lightning-formatted-number')?.value;
+    if(!value) return;
+
+    this.supportScoreHighlight($(host), value.toString());
   };
 
   supportScoreHighlight = (elToHighlight, score) => {
-    let number = isNaN(parseFloat(score)) ? 0 : parseFloat(score);
-    if (number > GLOBAL.settingsManager.settings.ssRedThreshold) {
+    let number = isNaN(parseFloat(score)) ? 0 : parseFloat(score.replace(',','.'));
+    if (number >= GLOBAL.settingsManager.settings.ssRedThreshold) {
       elToHighlight.css(
         'background-color',
         GLOBAL.settingsManager.settings.ssRedColor,
       );
-    } else if (number > GLOBAL.settingsManager.settings.ssOrangeThreshold) {
+    } else if (number >= GLOBAL.settingsManager.settings.ssOrangeThreshold) {
       elToHighlight.css(
         'background-color',
         GLOBAL.settingsManager.settings.ssOrangeColor,
       );
-    } else if (number > GLOBAL.settingsManager.settings.ssYellowThreshold) {
+    } else if (number >= GLOBAL.settingsManager.settings.ssYellowThreshold) {
       elToHighlight.css(
         'background-color',
         GLOBAL.settingsManager.settings.ssYellowColor,
@@ -701,7 +793,7 @@ class ConditionalFormatting {
   };
 
   supportScoreInReportsHighlighting2 = (textNode) => {
-    if (/^\d*\.\d*$/.test(textNode.textContent)) {
+    if (/^\d*[.,]\d*$/.test(textNode.textContent)) {
       let el = $(textNode.parentNode);
       let td = this.supportScoreTd(el);
       if (td) {
@@ -723,7 +815,10 @@ class ConditionalFormatting {
   };
 
   supportScoreInTableHighlighting = (textNode) => {
-    if (isNaN(textNode.textContent)) return;
+    if (isNaN(parseFloat(textNode.textContent)) ) return;
+
+    if(parseFloat(textNode.textContent) < 0 || parseFloat(textNode.textContent)>1000) return;
+
     const offspringOfTdToHighlight =
       textNode.getRootNode()?.host?.parentNode?.host?.parentNode?.parentNode;
     if (!offspringOfTdToHighlight) return;
@@ -782,7 +877,22 @@ class ConditionalFormatting {
             if (closest.length > 0) {
               ancestorFound = true;
               this.styleThis(closest, style);
+
+              // force text color, might not work when set in an ancestor
+              this.styleThis($(textNode), style);
               break;
+            } else {
+                // try 1 web component above
+                let closest2= textNode?.getRootNode()?.host;
+                closest2= closest2?.closest(selector);
+                if (closest2) {
+                 ancestorFound = true;
+                 this.styleThis($(closest2), style);
+
+                 // force text color, might not work when set in an ancestor
+                 textNode.getRootNode()?.host?.style?.setProperty('color', style.textColor);
+                 break;
+            }
             }
           }
           if (!ancestorFound && style.highlightIfAncestorNotFound) {
@@ -1041,7 +1151,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#ffd631ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1049,7 +1159,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#e33232ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1057,7 +1167,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#de6e31ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1065,7 +1175,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#de6e31ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1073,7 +1183,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#90ba92ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1081,7 +1191,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#34b738ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1089,7 +1199,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#90ba92ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1097,7 +1207,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#82c1beff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1105,7 +1215,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#1dbbb3ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1113,7 +1223,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#1dbbb3ff',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1121,7 +1231,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#3091EC',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1129,7 +1239,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#2F3941',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1137,7 +1247,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#eaedf0ff',
           textColor: '#000',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1145,7 +1255,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#eaedf0ff',
           textColor: '#000',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1153,7 +1263,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#eaedf0ff',
           textColor: '#000',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1161,7 +1271,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#3ba755',
           textColor: '#ffffff',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1169,7 +1279,15 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#2F3941',
           textColor: '#D8DCDE',
-          ancestorToHighlight: [],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
+          highlightIfAncestorNotFound: true,
+        },
+        {
+          text: 'Scheduled Task',
+          exactMatch: true,
+          bgColor: '#3ba755',
+          textColor: '#ffffff',
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1177,7 +1295,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#f30707ff',
           textColor: '#ffffff',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1185,7 +1303,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#e1590fff',
           textColor: '#ffffff',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1193,7 +1311,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#FBC02D',
           textColor: '#333333',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1201,7 +1319,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#d9ead3',
           textColor: '#333333',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1209,7 +1327,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#d9ead3',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1217,7 +1335,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#d9ead3',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1225,7 +1343,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#ffe599',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1233,7 +1351,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#f5b799',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1241,7 +1359,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#f5b799',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight:['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1249,7 +1367,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#ea9999',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight:['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1313,7 +1431,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#d9ead3',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1321,7 +1439,7 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#f5b799',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
         },
         {
@@ -1329,17 +1447,9 @@ class SettingsManager {
           exactMatch: true,
           bgColor: '#ea9999',
           textColor: '#000000',
-          ancestorToHighlight: ['.slds-form-element'],
+          ancestorToHighlight: ['button','lightning-base-combobox-item','.slds-form-element','td','th'],
           highlightIfAncestorNotFound: true,
-        },
-        {
-          text: 'Scheduled Task',
-          exactMatch: true,
-          bgColor: '#3ba755',
-          textColor: '#ffffff',
-          ancestorToHighlight: [],
-          highlightIfAncestorNotFound: true,
-        },
+        }
       ]),
       avatarColor: '#E34F32',
       autoClickInternalUpdatesTab: JSON.stringify(false),
@@ -1351,6 +1461,8 @@ class SettingsManager {
       closeAllTabsUsingCtrlQ: false,
       openAllImagesUsingCtrlI: false,
       allUrlHyperlinkingBeta: true,
+      autoExpandPosts: false,
+      shortenAPUrls: false,
       ssRedThreshold: 90,
       ssOrangeThreshold: 80,
       ssYellowThreshold: 70,
@@ -1605,7 +1717,7 @@ class UIinjector {
         }
         #roland-ui-mods-header-buttons {
             left: 100px;
-            position: absolute;            
+            position: absolute;
         }`);
     GM_addStyle(`.roland-ui-mods-whoslooking-indicator {
             background-color: ${GLOBAL.settingsManager.settings.avatarColor};
@@ -1860,10 +1972,11 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;Improved 'Who is looking' functionality to show concurrent updates by other users</li><br>
+          <li>&bull;&nbsp;Optional auto-expand of internal posts.</li><br>
+          <li>&bull;&nbsp;Optional shortening if Agile Place URLs to show only AP: <cardnumber>.</li><br>
         </ul>
         <br>
-  
+
         <div class="roland-ui-mods-form-heading">Settings</div>
         <form>
           <label><span>Avatar color</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="avatarColor" id="avatar-color-input" value="${GLOBAL.settingsManager.settings.avatarColor}"/></label>
@@ -1875,6 +1988,8 @@ class UIinjector {
           <label><span>Use CTRL+Q to close all tabs</span><input class="roland-ui-mods-settings-input" data-id="closeAllTabsUsingCtrlQ" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.closeAllTabsUsingCtrlQ) ? 'checked' : ''}/></label>
           <label><span>Use CTRL+I to open all images</span><input class="roland-ui-mods-settings-input" data-id="openAllImagesUsingCtrlI" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.openAllImagesUsingCtrlI) ? 'checked' : ''}/></label>
           <label><span>Hyperlink URLs when possible</span><input class="roland-ui-mods-settings-input" data-id="allUrlHyperlinkingBeta" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.allUrlHyperlinkingBeta) ? 'checked' : ''}/></label>
+          <label><span>Auto-expand internal posts</span><input class="roland-ui-mods-settings-input" data-id="autoExpandPosts" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.autoExpandPosts) ? 'checked' : ''}/></label>
+          <label><span>Shorten AgilePlace URLs</span><input class="roland-ui-mods-settings-input" data-id="shortenAPUrls" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.shortenAPUrls) ? 'checked' : ''}/></label>
           <label><span>Support Score red threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssRedThreshold" value="${GLOBAL.settingsManager.settings.ssRedThreshold}"/><input type="color" class="ss-color-picker" data-id="ssRedColor" value="${GLOBAL.settingsManager.settings.ssRedColor || '#ea9999'}" style="cursor:pointer;margin-left:6px;vertical-align:middle;"/><input type="text" maxlength="9" class="roland-ui-mods-input-field roland-ui-mods-settings-input ss-color-text" data-id="ssRedColor" value="${GLOBAL.settingsManager.settings.ssRedColor || '#ea9999'}" style="width:72px;"/></label>
           <label><span>Support Score orange threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssOrangeThreshold" value="${GLOBAL.settingsManager.settings.ssOrangeThreshold}"/><input type="color" class="ss-color-picker" data-id="ssOrangeColor" value="${GLOBAL.settingsManager.settings.ssOrangeColor || '#f5b799'}" style="cursor:pointer;margin-left:6px;vertical-align:middle;"/><input type="text" maxlength="9" class="roland-ui-mods-input-field roland-ui-mods-settings-input ss-color-text" data-id="ssOrangeColor" value="${GLOBAL.settingsManager.settings.ssOrangeColor || '#f5b799'}" style="width:72px;"/></label>
           <label><span>Support Score yellow threshold</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="ssYellowThreshold" value="${GLOBAL.settingsManager.settings.ssYellowThreshold}"/><input type="color" class="ss-color-picker" data-id="ssYellowColor" value="${GLOBAL.settingsManager.settings.ssYellowColor || '#ffe599'}" style="cursor:pointer;margin-left:6px;vertical-align:middle;"/><input type="text" maxlength="9" class="roland-ui-mods-input-field roland-ui-mods-settings-input ss-color-text" data-id="ssYellowColor" value="${GLOBAL.settingsManager.settings.ssYellowColor || '#ffe599'}" style="width:72px;"/></label>
@@ -2431,7 +2546,7 @@ const GLOBAL = {
   fileLinks: null,
   fileTabCloseButton: null,
   hideLeftColumn: false,
-  version: '2026.08.11.1',
+  version: '2026.10.13.01',
 };
 
 //entry function
