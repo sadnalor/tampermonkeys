@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.10.13.01
+// @version      2026.10.19.01
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -1973,7 +1973,8 @@ class UIinjector {
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
           <li>&bull;&nbsp;Optional auto-expand of internal posts.</li><br>
-          <li>&bull;&nbsp;Optional shortening if Agile Place URLs to show only AP: <cardnumber>.</li><br>
+          <li>&bull;&nbsp;Optional shortening of AgilePlace URLs to show only AP: &lt;cardnumber&gt;.</li><br>
+          <li>&bull;&nbsp;Fixed and improved color highlighting.</li><br>
         </ul>
         <br>
 
@@ -2546,7 +2547,7 @@ const GLOBAL = {
   fileLinks: null,
   fileTabCloseButton: null,
   hideLeftColumn: false,
-  version: '2026.10.13.01',
+  version: '2026.10.19.01',
 };
 
 //entry function
