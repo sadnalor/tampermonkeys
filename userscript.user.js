@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.10.19.01
+// @version      2026.11.01.01
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -17,6 +17,7 @@
 // @connect      tam-04a6caab6366.herokuapp.com
 // @connect      file.force.com
 // @connect      my.salesforce.com
+// @connect      planview.file.force.com
 //
 // @require      https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js
 // @require      https://cdn.jsdelivr.net/npm/jqueryui@1.13.2/jquery-ui.min.js
@@ -30,6 +31,7 @@
 // @grant        GM_listValues
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @run-at       document-idle
 //
 // @downloadURL  https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
 // @updateURL    https://github.com/sadnalor/tampermonkeys/releases/latest/download/userscript.user.js
@@ -1452,6 +1454,8 @@ class SettingsManager {
         }
       ]),
       avatarColor: '#E34F32',
+      enableDownloadAllButton: true,
+      downloadAllFormat: 'zip',
       autoClickInternalUpdatesTab: JSON.stringify(false),
       userName: null,
       scrollbarWidth: 5,
@@ -1517,6 +1521,12 @@ class SettingsManager {
       this.getSettingsList();
       this.getSettings();
     }
+    // ZIP is now the default.
+        const zipDefaultMigrationKey = 'downloadAllZipDefaultApplied';
+        if (!this.settings[zipDefaultMigrationKey]) {
+            this.update('downloadAllFormat', 'zip');
+            this.update(zipDefaultMigrationKey, true);
+        }
     for (let settingKey in this.defaultSettings) {
       if (!Object.keys(this.settings).includes(settingKey)) {
         this.settings[settingKey] = this.defaultSettings[settingKey];
@@ -1981,6 +1991,8 @@ class UIinjector {
         <div class="roland-ui-mods-form-heading">Settings</div>
         <form>
           <label><span>Avatar color</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="avatarColor" id="avatar-color-input" value="${GLOBAL.settingsManager.settings.avatarColor}"/></label>
+          <label><span>Enable "Download All Files" button</span><input class="roland-ui-mods-settings-input" data-id="enableDownloadAllButton" type="checkbox" ${GLOBAL.settingsManager.settings.enableDownloadAllButton !== false ? 'checked' : ''}/></label>
+          <label><span>Download all files format</span><select class="roland-ui-mods-settings-input" data-id="downloadAllFormat"><option value="zip" ${GLOBAL.settingsManager.settings.downloadAllFormat === 'zip' ? 'selected' : ''}>ZIP file</option><option value="folder" ${GLOBAL.settingsManager.settings.downloadAllFormat === 'folder' ? 'selected' : ''}>Directory (one folder per Case)</option></select></label>
           <label><span>Scrollbar width</span><input type="text" class="roland-ui-mods-input-field roland-ui-mods-settings-input" data-id="scrollbarWidth" id="scrollbar-width-input" value="${GLOBAL.settingsManager.settings.scrollbarWidth}"/></label>
           <label><span>Auto-click "Internal Only"</span><input class="roland-ui-mods-settings-input" data-id="autoClickInternalUpdatesTab" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.autoClickInternalUpdatesTab) ? 'checked' : ''}/></label>
           <label><span>Disable list refresh</span><input class="roland-ui-mods-settings-input" data-id="disableListRefresh" type="checkbox" ${JSON.parse(GLOBAL.settingsManager.settings.disableListRefresh) ? 'checked' : ''}/></label>
@@ -2509,6 +2521,7 @@ class UIinjector {
       newSettings = GLOBAL.settingsManager.update(name, value);
     });
     collapse();
+    GLOBAL.downloadAllFiles?.synchronizeButton();
   };
 }
 
@@ -2547,14 +2560,847 @@ const GLOBAL = {
   fileLinks: null,
   fileTabCloseButton: null,
   hideLeftColumn: false,
-  version: '2026.10.19.01',
+  downloadAllFiles: null,
+  version: '2026.11.01.01',
 };
+// ============================================================
+// DOWNLOAD ALL CASE FILES
+// ============================================================
+const pageWindow = (typeof unsafeWindow !== 'undefined') ?
+unsafeWindow : window;
+/**********************************************************************
+* CONFIGURATION
+**********************************************************************/
+const BUTTON_ID = 'pv-download-all-button';
+const FILE_HOST = 'https://planview.file.force.com';
+const REQUEST_TIMEOUT = 120000;
+const BUTTON_TOP_PROD = '152px';
+const BUTTON_TOP_TRIDENT = '185px';
+
+const BUTTON_TOP = window.location.hostname.includes(
+  '--trident.sandbox.lightning.force.com',
+)
+  ? BUTTON_TOP_TRIDENT
+  : BUTTON_TOP_PROD;
+const BUTTON_RIGHT = '150px';
+/**********************************************************************
+* isVisible() / deepQuerySelector() style helpers
+*
+* Mirrors the pattern used in Service Cloud Premium's own
+* isVisible()/deepQuerySelector(): a hidden ancestor (Salesforce
+* Console keeps every open Case tab mounted, just hidden) collapses
+* descendant bounding rects to 0x0, so filtering on that is enough
+* to only scrape the Case tab that is actually on screen.
+**********************************************************************/
+function downloadAllIsVisible(element) {
+    if (!element) return false;
+    const style = getComputedStyle(element);
+    if (style.display === 'none') return false;
+    if (style.visibility === 'hidden') return false;
+    if (style.opacity === '0') return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+}
+class DownloadAllFiles {
+    static instance = null;
+    constructor() {
+        DownloadAllFiles.instance = this;
+        this.isDownloading = false;
+        this.positionListenerAttached = false;
+        this.synchronizationScheduled = false;
+        this.observerStarted = false;
+        this.crcTable = null;
+        this.duplicateFileCount = 0;
+    }
+    log = (...args) => console.log('[PV Download All]', ...args);
+    isEnabled = () => GLOBAL.settingsManager?.settings?.enableDownloadAllButton !== false;
+    warn = (...args) => console.warn('[PV Download All]', ...args);
+    error = (...args) => console.error('[PV Download All]', ...args);
+    sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    /******************************************************************
+* CASE IDENTIFICATION
+******************************************************************/
+    getCaseId = () => {
+        const path = window.location.pathname;
+        let match = path.match(/\/lightning\/r\/Case\/([a-zA-Z0-9]{15,18})/);
+        if (match) return match[1];
+        match = window.location.href.match(/[?&](?:id|recordId)=([a-zA-Z0-9]{15,18})/);
+        if (match) return match[1];
+        return null;
+    };
+    getCaseNumber = () => {
+        const titleMatch = document.title.match(/\b(\d{5,10})\b/);
+        if (titleMatch) return titleMatch[1];
+        const headerSelectors = [
+        '.slds-page-header', '.forceHighlightsPanel',
+        'records-lwc-highlights-panel', 'lightning-highlights', 'h1'
+        ];
+        for (const selector of headerSelectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const element of elements) {
+                const text = element.innerText || '';
+                const match = text.match(/\b(\d{5,10})\b/);
+                if (match) return match[1];
+            }
+        }
+        return null;
+    };
+    getCaseReference = () => {
+        const caseNumber = this.getCaseNumber();
+        if (caseNumber) return this.sanitizeFilename(caseNumber);
+        return this.getCaseId() || 'Attachments';
+    };
+    isAttachmentsPage = () => {
+        const path = window.location.pathname;
+        return (
+        path.includes('/related/CombinedAttachments/view') ||
+        path.includes('/related/Files/view') ||
+        path.includes('/related/AttachedContentDocuments/view') ||
+        path.includes('/related/Attachments/view')
+        );
+    };
+    /******************************************************************
+* GM_xmlhttpRequest WRAPPER
+******************************************************************/
+    gmRequest = (url, { responseType = 'text', method = 'GET' } = {}) => {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method, url, responseType, anonymous: false, timeout: REQUEST_TIMEOUT,
+                onload: resolve,
+                onerror: () => reject(new Error(`Request failed: ${url}`)),
+                ontimeout: () => reject(new Error('Request timed out'))
+            });
+        });
+    };
+    /******************************************************************
+* GET CASE FILES — DOM scraping, scoped to the visible Case tab only
+******************************************************************/
+   getFilesFromDom = () => {
+       const files = [];
+       const seen = new Set();
+       let duplicateCount = 0;
+       const selector =
+             'a[href*="/lightning/r/ContentDocument/"],' +
+             'a[href*="/lightning/r/Attachment/"]';
+
+       const links =
+             typeof deepQuerySelector === 'function'
+       ? deepQuerySelector(selector, document, false) || []
+       : [...document.querySelectorAll(selector)];
+
+       for (const link of links) {
+           if (!downloadAllIsVisible(link)) continue;
+           const href = link.getAttribute('href') || '';
+           const titleElement = link.querySelector('.itemTitle.desktop');
+           const displayName = (
+               titleElement?.getAttribute('title') ||
+               titleElement?.textContent ||
+               link.textContent ||
+               ''
+           ).trim();
+
+           let match = href.match(
+               /\/lightning\/r\/ContentDocument\/([a-zA-Z0-9]{15,18})/
+           );
+           if (match) {
+               const id = match[1];
+               const key = `cd:${id}`;
+               if (!seen.has(key)) {
+                   seen.add(key);
+                   files.push({
+                       type: 'ContentDocument',
+                       id,
+                       name: displayName || 'file'
+                   });
+               } else {
+                   duplicateCount++;
+                   this.log('Duplicate file ignored:', {
+                       id,
+                       name: displayName
+                   });
+               }
+               continue;
+           }
+           match = href.match(
+               /\/lightning\/r\/Attachment\/([a-zA-Z0-9]{15,18})/
+           );
+           if (match) {
+               const id = match[1];
+               const key = `att:${id}`;
+               if (!seen.has(key)) {
+                   seen.add(key);
+                   files.push({
+                       type: 'Attachment',
+                       id,
+                       name: displayName || 'attachment'
+                   });
+               } else {
+                   duplicateCount++;
+                   this.log('Duplicate attachment ignored:', id);
+               }
+           }
+       }
+       this.log(
+           `Found ${files.length} unique file(s). Ignored ${duplicateCount} duplicate(s).`
+       );
+
+       this.duplicateFileCount = duplicateCount;
+       return files;
+   };
+    getCaseFiles = async () => {
+        await this.sleep(50);
+        return this.getFilesFromDom();
+    };
+    /******************************************************************
+* DOWNLOAD URL / FILENAME
+******************************************************************/
+    getDownloadUrl = (file) => {
+        if (file.type === 'ContentDocument') {
+            return `${FILE_HOST}/sfc/servlet.shepherd/document/download/${encodeURIComponent(file.id)}`;
+        }
+        if (file.type === 'Attachment') {
+            return `${FILE_HOST}/servlet/servlet.FileDownload?file=${encodeURIComponent(file.id)}`;
+        }
+        throw new Error(`Unsupported file type: ${file.type}`);
+    };
+    getFilenameFromHeaders = (headers, fallbackName, index) => {
+        const lines = String(headers || '').split(/\r?\n/);
+        const line = lines.find(item => /^content-disposition:/i.test(item));
+        const disposition = line ?
+        line.substring(line.indexOf(':') + 1).trim() : '';
+        const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+        if (match) {
+        try { return decodeURIComponent(match[1] || match[2]); }
+        catch (_) { return match[1] || match[2]; }
+    }
+        return fallbackName || `file-${String(index + 1).padStart(2, '0')}`;
+    };
+        downloadFile = async (file, index) => {
+        const url = this.getDownloadUrl(file);
+        this.log('Downloading:', file.name);
+        const response = await this.gmRequest(url, { responseType: 'arraybuffer' });
+        if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Download failed for "${file.name}".
+        HTTP ${response.status}.`);
+    }
+        const resolvedName = this.getFilenameFromHeaders(response.responseHeaders, file.name, index);
+        return { data: new Uint8Array(response.response), name: resolvedName };
+    };
+        /******************************************************************
+        * FILENAME SANITIZATION
+        ******************************************************************/
+     sanitizeFilename = (name) => {
+         let result = String(name ?? 'file')
+         .normalize('NFC')
+         .replace(/[<>:"/\|?*\u0000-\u001F\u007F]/g, '_')
+         .trim()
+         .replace(/[ .]+$/g, '');
+
+         if (!result || result === '.' || result === '..') {
+             result = 'file';
+         }
+
+         const reserved = new Set([
+             'CON', 'PRN', 'AUX', 'NUL',
+             'COM1', 'COM2', 'COM3', 'COM4', 'COM5',
+             'COM6', 'COM7', 'COM8', 'COM9',
+             'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5',
+             'LPT6', 'LPT7', 'LPT8', 'LPT9'
+         ]);
+
+         const base = result.split('.')[0].toUpperCase();
+
+         if (reserved.has(base)) {
+             result = `_${result}`;
+         }
+
+         // avoid long names
+         const maxLength = 180;
+
+         if (result.length > maxLength) {
+             const extensionIndex = result.lastIndexOf('.');
+             const extension =
+                   extensionIndex > 0 ? result.substring(extensionIndex) : '';
+             const baseName =
+                   extensionIndex > 0
+             ? result.substring(0, extensionIndex)
+             : result;
+
+             if (extension.length >= maxLength) {
+                 result = result.substring(0, maxLength);
+             } else {
+                 result =
+                     baseName.substring(0, maxLength - extension.length) +
+                     extension;
+             }
+         }
+
+         return result;
+     };
+    makeUniqueFilename = (filename, usedNames) => {
+        const safe = this.sanitizeFilename(filename);
+        const key = safe.toLowerCase();
+        if (!usedNames.has(key)) { usedNames.add(key); return safe; }
+        const dot = safe.lastIndexOf('.');
+        const base = dot > 0 ?
+        safe.substring(0, dot) : safe;
+        const extension = dot > 0 ?
+        safe.substring(dot) : '';
+        let counter = 2;
+        while (true) {
+            const candidate = `${base} (${counter})${extension}`;
+            const candidateKey = candidate.toLowerCase();
+            if (!usedNames.has(candidateKey)) { usedNames.add(candidateKey); return candidate; }
+            counter++;
+        }
+    };
+    /******************************************************************
+* CRC32 / ZIP HELPERS
+******************************************************************/
+    createCRCTable = () => {
+        const table = new Uint32Array(256);
+        for (let n = 0; n < 256; n++) {
+            let c = n;
+            for (let k = 0; k < 8; k++) { c = (c & 1) ?
+                (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); }
+            table[n] = c >>> 0;
+        }
+        return table;
+    };
+    crc32 = (data) => {
+        if (!this.crcTable) this.crcTable = this.createCRCTable();
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < data.length; i++) { crc = this.crcTable[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8); }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+    };
+    write16 = (view, offset, value) => view.setUint16(offset, value, true);
+    write32 = (view, offset, value) => view.setUint32(offset, value >>> 0, true);
+    utf8 = (text) => new TextEncoder().encode(text);
+    getDosDateTime = () => {
+        const date = new Date();
+        const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+        const dosDate = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+        return { dosTime, dosDate };
+    };
+    createLocalHeader = (filenameBytes, crc, size, dosTime, dosDate) => {
+        const header = new Uint8Array(30 + filenameBytes.length);
+        const view = new DataView(header.buffer);
+        this.write32(view, 0, 0x04034b50); this.write16(view, 4, 20); this.write16(view, 6, 0x0800);
+        this.write16(view, 8, 0); this.write16(view, 10, dosTime); this.write16(view, 12, dosDate);
+        this.write32(view, 14, crc); this.write32(view, 18, size); this.write32(view, 22, size);
+        this.write16(view, 26, filenameBytes.length); this.write16(view, 28, 0);
+        header.set(filenameBytes, 30);
+        return header;
+    };
+    createCentralHeader = (entry) => {
+        const filenameBytes = this.utf8(entry.filename);
+        const header = new Uint8Array(46 + filenameBytes.length);
+        const view = new DataView(header.buffer);
+        this.write32(view, 0, 0x02014b50); this.write16(view, 4, 20); this.write16(view, 6, 20);
+        this.write16(view, 8, 0x0800); this.write16(view, 10, 0); this.write16(view, 12, entry.dosTime);
+        this.write16(view, 14, entry.dosDate); this.write32(view, 16, entry.crc); this.write32(view, 20, entry.size);
+        this.write32(view, 24, entry.size); this.write16(view, 28, filenameBytes.length); this.write16(view, 30, 0);
+        this.write16(view, 32, 0); this.write16(view, 34, 0); this.write16(view, 36, 0); this.write32(view, 38, 0);
+        this.write32(view, 42, entry.offset);
+        header.set(filenameBytes, 46);
+        return header;
+    };
+    createEndRecord = (entryCount, centralSize, centralOffset) => {
+        const data = new Uint8Array(22);
+        const view = new DataView(data.buffer);
+        this.write32(view, 0, 0x06054b50); this.write16(view, 4, 0); this.write16(view, 6, 0);
+        this.write16(view, 8, entryCount); this.write16(view, 10, entryCount);
+        this.write32(view, 12, centralSize); this.write32(view, 16, centralOffset); this.write16(view, 20, 0);
+        return data;
+    };
+    /******************************************************************
+* ZIP CREATION
+******************************************************************/
+    createZipBlob = async (files) => {
+        const parts = [];
+        const centralDirectory = [];
+        let offset = 0;
+        const usedNames = new Set();
+        const caseReference = this.getCaseReference();
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            this.updateButtonText(`Downloading ${i + 1}/${files.length}...`);
+            this.log(`Downloading ${i + 1}/${files.length}:`, file.name);
+            const downloaded = await this.downloadFile(file, i);
+            const filename = this.makeUniqueFilename(downloaded.name, usedNames);
+            const zipPath = `${caseReference}/${filename}`;
+            const data = downloaded.data;
+            const crc = this.crc32(data);
+            const { dosTime, dosDate } = this.getDosDateTime();
+            const filenameBytes = this.utf8(zipPath);
+            const header = this.createLocalHeader(filenameBytes, crc, data.length, dosTime, dosDate);
+            parts.push(header); parts.push(data);
+            centralDirectory.push({ filename: zipPath, crc, size: data.length, offset, dosTime, dosDate });
+            offset += header.length + data.length;
+            if (i % 3 === 0) await this.sleep(0);
+        }
+        const centralOffset = offset;
+        let centralSize = 0;
+        for (const entry of centralDirectory) {
+            const header = this.createCentralHeader(entry);
+            parts.push(header);
+            centralSize += header.length;
+            offset += header.length;
+        }
+        const end = this.createEndRecord(centralDirectory.length, centralSize, centralOffset);
+        parts.push(end);
+        return new Blob(parts, { type: 'application/zip' });
+    };
+    createZipDirectToDisk = async (files, existingHandle = null) => {
+       let handle = existingHandle;
+        if (!handle) {
+            if (typeof pageWindow.showSaveFilePicker !== 'function') {
+                return false;
+            }
+            handle = await pageWindow.showSaveFilePicker({
+                suggestedName: `Case_${this.getCaseReference()}_files.zip`,
+                types: [
+                    {
+                        description: 'ZIP archive',
+                        accept: { 'application/zip': ['.zip'] }
+                    }
+                ]
+            });
+        }
+        const writable = await handle.createWritable();
+        const centralDirectory = [];
+        let offset = 0;
+        const usedNames = new Set();
+        const caseReference = this.getCaseReference();
+        try {
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                this.updateButtonText(`Downloading ${i + 1}/${files.length}...`);
+                this.log(`Downloading ${i + 1}/${files.length}:`, file.name);
+                const downloaded = await this.downloadFile(file, i);
+                const filename = this.makeUniqueFilename(downloaded.name, usedNames);
+                const zipPath = `${caseReference}/${filename}`;
+                const data = downloaded.data;
+                const crc = this.crc32(data);
+                const { dosTime, dosDate } = this.getDosDateTime();
+                const filenameBytes = this.utf8(zipPath);
+                const header = this.createLocalHeader(filenameBytes, crc, data.length, dosTime, dosDate);
+                await writable.write(header);
+                await writable.write(data);
+                centralDirectory.push({ filename: zipPath, crc, size: data.length, offset, dosTime, dosDate });
+                offset += header.length + data.length;
+                await this.sleep(0);
+            }
+            const centralOffset = offset;
+            let centralSize = 0;
+            for (const entry of centralDirectory) {
+                const header = this.createCentralHeader(entry);
+                await writable.write(header);
+                centralSize += header.length;
+                offset += header.length;
+            }
+            const end = this.createEndRecord(centralDirectory.length, centralSize, centralOffset);
+            await writable.write(end);
+            await writable.close();
+            return true;
+        } catch (e) {
+            try { await writable.abort(); } catch (_) {}
+            throw e;
+        }
+    };
+    createFolderDirectToDisk = async (
+        files,
+        existingParentDirectory = null
+    ) => {
+        let parentDirectory = existingParentDirectory;
+        if (!parentDirectory) {
+            if (typeof pageWindow.showDirectoryPicker !== 'function') {
+                throw new Error(
+                    'Folder download requires Chrome or Edge with File System Access API support.'
+                );
+            }
+            parentDirectory = await pageWindow.showDirectoryPicker({
+                mode: 'readwrite',
+                startIn: 'downloads'
+            });
+        }
+
+        const caseFolderName = `Case_${this.getCaseReference()}_files`;
+        const caseDirectory = await parentDirectory.getDirectoryHandle(caseFolderName, { create: true });
+        const usedNames = new Set();
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            this.updateButtonText(`Downloading ${i + 1}/${files.length}...`);
+            this.log(`Downloading ${i + 1}/${files.length}:`, file.name);
+            const downloaded = await this.downloadFile(file, i);
+            let filename = this.makeUniqueFilename(downloaded.name, usedNames);
+
+            this.log('Folder filename:', {
+                original: downloaded.name,
+                safe: filename
+            });
+
+            let fileHandle;
+
+            try {
+                fileHandle = await caseDirectory.getFileHandle(filename, {
+                    create: true
+                });
+            } catch (e) {
+                this.warn('Filename rejected; using fallback name.', {
+                    original: downloaded.name,
+                    rejected: filename,
+                    error: e.message
+                });
+
+                const extension =
+                      filename.match(/.[A-Za-z0-9]{1,10}$/)?.[0] || '';
+                const fallbackName = `file-${String(i + 1).padStart(2, '0')}${extension}`;
+                filename = this.makeUniqueFilename(fallbackName, usedNames);
+                fileHandle = await caseDirectory.getFileHandle(filename, {
+                    create: true
+                });
+            }
+            const writable = await fileHandle.createWritable();
+            try {
+                await writable.write(downloaded.data);
+                await writable.close();
+            } catch (e) {
+                try { await writable.abort(); } catch (_) {}
+                throw e;
+            }
+            await this.sleep(0);
+        }
+        return true;
+    };
+    saveBlob = (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url; link.download = filename;
+        document.body.appendChild(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+    };
+    /******************************************************************
+* MAIN DOWNLOAD
+******************************************************************/
+    downloadAllFiles = async () => {
+        if (this.isDownloading) return;
+        const caseId = this.getCaseReference();
+        const format = GLOBAL.settingsManager.settings.downloadAllFormat || 'zip';
+        this.isDownloading = true;
+        const button = document.getElementById(BUTTON_ID);
+        if (button) { button.disabled = true; button.style.opacity = '0.7'; button.style.cursor = 'wait'; }
+        try {
+            this.updateButtonText('Loading files...');
+
+            // Synchronous DOM read: no await before the native picker
+            const files = this.getFilesFromDom();
+
+            if (!files.length) {
+                alert('No files or attachments were found on this page.');
+                return;
+            }
+
+            let directZipHandle = null;
+            let directParentDirectory = null;
+
+            // Open the native picker while the button click is still active
+            if (format === 'folder') {
+                if (typeof pageWindow.showDirectoryPicker !== 'function') {
+                    throw new Error(
+                        'Folder download requires Chrome or Edge with File System Access API support.'
+                    );
+                }
+
+                directParentDirectory = await pageWindow.showDirectoryPicker({
+                    mode: 'readwrite',
+                    startIn: 'downloads'
+                });
+            } else if (typeof pageWindow.showSaveFilePicker === 'function') {
+                directZipHandle = await pageWindow.showSaveFilePicker({
+                    suggestedName: `Case_${this.getCaseReference()}_files.zip`,
+                    types: [
+                        {
+                            description: 'ZIP archive',
+                            accept: { 'application/zip': ['.zip'] }
+                        }
+                    ]
+                });
+            }
+
+            const duplicateMessage =
+                  this.duplicateFileCount > 0
+            ? `\n${this.duplicateFileCount} duplicate file(s) skipped.`
+            : '';
+            this.log(`Starting download of ${files.length} file(s) in ${format} mode.`);
+
+            if (format === 'folder') {
+                const success = await this.createFolderDirectToDisk(
+                    files,
+                    directParentDirectory
+                );
+                if (success) {
+                    this.updateButtonText('Download all files');
+                    alert(
+                        `Directory created successfully.\n\n` +
+                        `Case_${caseId}_files\n` +
+                        `${files.length} unique file(s) downloaded.` +
+                        duplicateMessage
+                    );
+                    return;
+                }
+            }
+
+            if (typeof pageWindow.showSaveFilePicker === 'function') {
+                try {
+                    const success = await this.createZipDirectToDisk(
+                        files,
+                        directZipHandle
+                    );
+                    if (success) {
+                        this.updateButtonText('Download all files');
+                        alert(
+                            `ZIP created successfully.\n\n` +
+                            `${files.length} unique file(s) downloaded.` +
+                            duplicateMessage
+                        );
+                        return;
+                    }
+                } catch (e) {
+                    if (e && e.name === 'AbortError') {
+                        this.log('Save dialog cancelled.');
+                        return;
+                    }
+
+                    this.error(
+                        'Direct-to-disk ZIP creation failed. Falling back to browser download.',
+                        e
+                    );
+                }
+            }
+            this.updateButtonText('Creating ZIP...');
+            const blob = await this.createZipBlob(files);
+            this.saveBlob(blob, `Case_${caseId}_files.zip`);
+            this.updateButtonText('Download all files');
+            alert(
+                `ZIP created successfully.\n\n` +
+                `${files.length} unique file(s) downloaded.` +
+                duplicateMessage
+            );
+            this.log('ZIP download started.');
+        } catch (e) {
+            if (e && e.name === 'AbortError') {
+                this.log('Directory selection cancelled.');
+                return;
+            }
+            this.error('Download all failed:', e);
+            alert(`Download failed.\n\n${e.message || e}`);
+        } finally {
+            this.isDownloading = false;
+            const btn = document.getElementById(BUTTON_ID);
+            if (btn) {
+                btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer';
+                this.updateButtonText('Download all files');
+            }
+        }
+    };
+
+   //
+    synchronizeButtonPosition = (
+        button = document.getElementById(BUTTON_ID),
+    ) => {
+        if (!button) return false;
+        const candidates =
+              typeof deepQuerySelector === 'function'
+        ? deepQuerySelector('button', document, false) || []
+        : [...document.querySelectorAll('button')];
+
+        const uploadButton = candidates.find((element) => {
+            const label = (element.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+            return (
+                label === 'Upload Files' &&
+                downloadAllIsVisible(element)
+            );
+        });
+
+        if (!uploadButton) {
+            button.style.position = 'fixed';
+            button.style.top = BUTTON_TOP;
+            button.style.left = 'auto';
+            button.style.right = BUTTON_RIGHT;
+            return false;
+        }
+
+        const uploadPosition = uploadButton.getBoundingClientRect();
+        const gap = 8;
+
+        button.style.position = 'fixed';
+        button.style.top = `${uploadPosition.top}px`;
+        button.style.left = `${
+        uploadPosition.left - button.offsetWidth - gap
+    }px`;
+        button.style.right = 'auto';
+
+        return true;
+    };
+    /******************************************************************
+* BUTTON
+******************************************************************/
+    createButton = () => {
+        let button = document.getElementById(BUTTON_ID);
+        if (button) {
+            this.synchronizeButtonPosition(button);
+            return button;
+        }
+        button = document.createElement('button');
+        button.id = BUTTON_ID;
+        button.type = 'button';
+        button.textContent = 'Download all files';
+        button.title = 'Download all Case files as ZIP or Directory';
+        Object.assign(button.style, {
+            position: 'fixed', top: BUTTON_TOP, right: BUTTON_RIGHT, zIndex: '2147483647',
+            padding: '6px 14px', background: '#0176d3', color: '#ffffff', border: 'none',
+            borderRadius: '4px', fontFamily: 'Salesforce Sans, Arial, sans-serif',
+            fontSize: '13px', fontWeight: '400', lineHeight: '18px',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.25)', cursor: 'pointer', display: 'inline-block', userSelect: 'none'
+        });
+        button.addEventListener('mouseenter', () => { if (!button.disabled) button.style.filter = 'brightness(0.95)'; });
+        button.addEventListener('mouseleave', () => { button.style.filter = ''; });
+        button.addEventListener('click', this.downloadAllFiles);
+        document.body.appendChild(button);
+        this.synchronizeButtonPosition(button);
+        if (!this.positionListenerAttached) {
+            this.positionListenerAttached = true;
+            window.addEventListener('resize', () => {
+                this.synchronizeButtonPosition();
+            });
+        }
+        let alignmentAttempts = 0;
+        const retryAlignment = () => {
+            if (
+                this.synchronizeButtonPosition(button) ||
+                alignmentAttempts++ >= 20
+            ) {
+                return;
+            }
+            setTimeout(retryAlignment, 500);
+        };
+        retryAlignment();
+        return button;
+    };
+    updateButtonText = (text) => {
+        const button = document.getElementById(BUTTON_ID);
+        if (button) button.textContent = text;
+    };
+    /******************************************************************
+* PREVIEW DETECTION
+******************************************************************/
+    hasVisiblePreviewContainer = () => {
+        const selectors = ['.forceContentPreviewPlayer', '.forceContentPreviewPlayerDesktop', '.forceContentPreviewViewer', '.lightning-file-preview'];
+        for (const selector of selectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const element of elements) { if (downloadAllIsVisible(element)) return true; }
+        }
+        return false;
+    };
+    hasVisiblePreviewDialog = () => {
+        const dialogs = document.querySelectorAll('[role="dialog"], section.slds-modal');
+        for (const dialog of dialogs) {
+            if (!downloadAllIsVisible(dialog)) continue;
+            const rect = dialog.getBoundingClientRect();
+            const viewportArea = window.innerWidth * window.innerHeight;
+            const dialogArea = rect.width * rect.height;
+            if (dialogArea < viewportArea * 0.15) continue;
+            const previewContent = dialog.querySelector('iframe, img, video, audio, embed, object');
+            if (previewContent && downloadAllIsVisible(previewContent)) return true;
+        }
+        return false;
+    };
+    isFilePreviewOpen = () => this.hasVisiblePreviewContainer() || this.hasVisiblePreviewDialog();
+    hasVisibleApplicationPopup = () => {
+        const popupIds = [
+            'roland-ui-mods-settings-popup',
+            'roland-ui-mods-image-viewer-popup'
+        ];
+
+        return popupIds.some((id) => {
+            const popup = document.getElementById(id);
+            return popup && downloadAllIsVisible(popup);
+        });
+    };
+
+    updateButtonVisibility = () => {
+    const button = document.getElementById(BUTTON_ID);
+    if (!button) return;
+
+    const shouldHide =
+        this.isFilePreviewOpen() ||
+        this.hasVisibleApplicationPopup();
+
+    button.style.display = shouldHide ? 'none' : 'block';
+};
+    /******************************************************************
+* SYNCHRONIZATION WITH SALESFORCE SPA NAVIGATION
+******************************************************************/
+    synchronizeButton = () => {
+        this.synchronizationScheduled = false;
+        if (!this.isEnabled() || !this.isAttachmentsPage()) {
+            const existing = document.getElementById(BUTTON_ID);
+            if (existing) existing.remove();
+            return;
+        }
+        this.createButton();
+        this.updateButtonVisibility();
+
+        const button = document.getElementById(BUTTON_ID);
+        if (button && button.style.display !== 'none') {
+            this.synchronizeButtonPosition(button);
+        }
+    };
+    scheduleSynchronization = () => {
+        if (this.synchronizationScheduled) return;
+        this.synchronizationScheduled = true;
+        setTimeout(this.synchronizeButton, 100);
+    };
+    startObserver = () => {
+        if (this.observerStarted) return;
+        this.observerStarted = true;
+        const observer = new MutationObserver(() => { this.scheduleSynchronization(); });
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'aria-hidden'] });
+        this.log('MutationObserver started.');
+    };
+    monitorNavigation = () => {
+        let lastUrl = window.location.href;
+        setInterval(() => {
+            const currentUrl = window.location.href;
+            if (currentUrl !== lastUrl) { lastUrl = currentUrl; this.log('Salesforce navigation detected.'); this.scheduleSynchronization(); }
+        }, 500);
+    };
+    /******************************************************************
+* ENTRY POINT
+******************************************************************/
+    run = () => {
+        this.log('Salesforce Download All V4.3 (integrated) initialized.');
+        this.synchronizeButton();
+        this.startObserver();
+        this.monitorNavigation();
+        setTimeout(this.synchronizeButton, 500);
+        setTimeout(this.synchronizeButton, 1500);
+        setTimeout(this.synchronizeButton, 3000);
+    };
+}
+
 
 //entry function
 
 const rolandUImods = () => {
   console.log('Service Cloud Premium version:', GLOBAL.version);
   GLOBAL.settingsManager = new SettingsManager();
+  GLOBAL.downloadAllFiles = new DownloadAllFiles();
+  GLOBAL.downloadAllFiles.run();
   GLOBAL.mutationObserverRegistry = new MutationObserverRegistry('Global');
   GLOBAL.mutationObserverRegistry.createObserver();
   GLOBAL.mutationObserverRegistry.observer.observe(document.body, {
