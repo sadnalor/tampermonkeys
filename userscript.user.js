@@ -1982,9 +1982,8 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;Optional auto-expand of internal posts.</li><br>
-          <li>&bull;&nbsp;Optional shortening of AgilePlace URLs to show only AP: &lt;cardnumber&gt;.</li><br>
-          <li>&bull;&nbsp;Fixed and improved color highlighting.</li><br>
+          <li>&bull;&nbsp;New "Download all files" button on Case attachment pages, saving all files as a ZIP or into a folder per Case.</li><br>
+          <li>&bull;&nbsp;New settings to enable the button and choose the download format.</li><br>
         </ul>
         <br>
 
@@ -2792,7 +2791,7 @@ class DownloadAllFiles {
      sanitizeFilename = (name) => {
          let result = String(name ?? 'file')
          .normalize('NFC')
-         .replace(/[<>:"/\|?*\u0000-\u001F\u007F]/g, '_')
+         .replace(/[<>:"/\\|?*\u0000-\u001F\u007F]/g, '_')
          .trim()
          .replace(/[ .]+$/g, '');
 
