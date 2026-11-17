@@ -110,6 +110,7 @@ class ConditionalFormatting {
           exactMatch: false,
           bgColor: '#0176d3',
           textColor: '#ffffff',
+          fontWeight: 'bold',
           ancestorToHighlight: [],
           highlightIfAncestorNotFound: true,
         });
@@ -162,10 +163,13 @@ class ConditionalFormatting {
         if (style) {
           t.style.setProperty('background-color', style.bgColor, 'important');
           t.style.setProperty('color', style.textColor, 'important');
+          if (style.fontWeight)
+            t.style.setProperty('font-weight', style.fontWeight, 'important');
           t.dataset.scpWarnHighlight = '1';
         } else if (t.dataset.scpWarnHighlight) {
           t.style.removeProperty('background-color');
           t.style.removeProperty('color');
+          t.style.removeProperty('font-weight');
           delete t.dataset.scpWarnHighlight;
         }
       }
@@ -981,6 +985,7 @@ class ConditionalFormatting {
   styleThis = (el, style) => {
     el.css('background-color', style.bgColor);
     el.css('color', style.textColor);
+    if (style.fontWeight) el.css('font-weight', style.fontWeight);
   };
 
   gatherCaseIdNumberPairs = (textNode) => {
