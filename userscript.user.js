@@ -98,6 +98,23 @@ class ConditionalFormatting {
         });
       }
     }
+    // Always-on highlights (blue background, white text)
+    this.warningTexts = [
+      // 'Create Dev Card SC', // disabled for now
+      "Please select 'Dev Request' or 'Defect' to create a new record.",
+    ];
+    for (const warningText of this.warningTexts) {
+      if (!this.textMatchStyles.some((s) => s.text === warningText)) {
+        this.textMatchStyles.push({
+          text: warningText,
+          exactMatch: false,
+          bgColor: '#0176d3',
+          textColor: '#ffffff',
+          ancestorToHighlight: [],
+          highlightIfAncestorNotFound: true,
+        });
+      }
+    }
     //this.displayTimeSpent();
     this.textHighlightColorMap = this.calculateTextHighlightColorMap();
     this.textValuesToMonitor = Object.keys(this.textHighlightColorMap);
@@ -122,6 +139,37 @@ class ConditionalFormatting {
     GLOBAL.mutationObserverRegistry.addFunctionForNodeAddition(
       this.defectRequestMod,
     );
+    // Input/select values are not text nodes and change without DOM mutations,
+    // so they are checked periodically.
+    setInterval(this.highlightFieldValues, 1000);
+  };
+
+  highlightFieldValues = () => {
+    const warningStyles = this.textMatchStyles.filter((s) =>
+      this.warningTexts.includes(s.text),
+    );
+    const controls =
+      deepQuerySelector('input, select, a[role="combobox"]') || [];
+    for (const el of controls) {
+      let value = el.value || '';
+      if (el.tagName === 'SELECT' && el.selectedOptions?.length)
+        value = el.selectedOptions[0].textContent.trim();
+      else if (el.tagName === 'A') value = (el.textContent || '').trim();
+      // Aura picklists show the value in a child span; style it too
+      const targets = [el, ...(el.tagName === 'A' ? el.querySelectorAll('span') : [])];
+      const style = warningStyles.find((s) => value.includes(s.text));
+      for (const t of targets) {
+        if (style) {
+          t.style.setProperty('background-color', style.bgColor, 'important');
+          t.style.setProperty('color', style.textColor, 'important');
+          t.dataset.scpWarnHighlight = '1';
+        } else if (t.dataset.scpWarnHighlight) {
+          t.style.removeProperty('background-color');
+          t.style.removeProperty('color');
+          delete t.dataset.scpWarnHighlight;
+        }
+      }
+    }
   };
 
   processMutation = (mutation, observerName) => {
@@ -591,7 +639,8 @@ class ConditionalFormatting {
     }
   };
 
-  waitForFileLinks = () => {
+  waitForFileLinks = (attempt = 0) => {
+    if (attempt >= 300) return; // give up after ~30s
     setTimeout(() => {
       let fileTabCloseButton = $(`button[title="Close Files"]`);
       console.log('close button', fileTabCloseButton);
@@ -605,7 +654,7 @@ class ConditionalFormatting {
         GLOBAL.fileLinks = fileLinks;
         if (typeof GLOBAL.imageUrlResolvedCallback == 'function')
           GLOBAL.imageUrlResolvedCallback(fileLinks);
-      } else this.waitForFileLinks();
+      } else this.waitForFileLinks(attempt + 1);
     }, 100);
   };
 
