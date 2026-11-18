@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.11.09.01
+// @version      2026.11.18.01
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -146,6 +146,8 @@ class ConditionalFormatting {
   };
 
   highlightFieldValues = () => {
+    // Skip the full-page scan while the browser tab is in the background
+    if (document.hidden) return;
     const warningStyles = this.textMatchStyles.filter((s) =>
       this.warningTexts.includes(s.text),
     );
@@ -2036,8 +2038,8 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;New "Download all files" button on Case attachment pages, saving all files as a ZIP or into a folder per Case.</li><br>
-          <li>&bull;&nbsp;New settings to enable the button and choose the download format.</li><br>
+          <li>&bull;&nbsp;Highlight "Please select 'Dev Request' or 'Defect' to create a new record." in blue on the Dev Shared Capabilities card, in the dropdown list and in the selected field value.</li><br>
+          <li>&bull;&nbsp;Fixed a background retry loop when looking for Case file links, which now stops after about 30 seconds.</li><br>
         </ul>
         <br>
 
@@ -2614,7 +2616,7 @@ const GLOBAL = {
   fileTabCloseButton: null,
   hideLeftColumn: false,
   downloadAllFiles: null,
-  version: '2026.11.09.01',
+  version: '2026.11.18.01',
 };
 // ============================================================
 // DOWNLOAD ALL CASE FILES
