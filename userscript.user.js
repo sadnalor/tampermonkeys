@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Service Cloud Premium 3
 // @namespace    https://github.com/sadnalor/tampermonkeys
-// @version      2026.11.09.01
+// @version      2026.11.18.01
 // @author       Roland
 // @description  Internal Salesforce Service Cloud helper
 //
@@ -98,6 +98,24 @@ class ConditionalFormatting {
         });
       }
     }
+    // Always-on highlights (blue background, white text)
+    this.warningTexts = [
+      // 'Create Dev Card SC', // disabled for now
+      "Please select 'Dev Request' or 'Defect' to create a new record.",
+    ];
+    for (const warningText of this.warningTexts) {
+      if (!this.textMatchStyles.some((s) => s.text === warningText)) {
+        this.textMatchStyles.push({
+          text: warningText,
+          exactMatch: false,
+          bgColor: '#0176d3',
+          textColor: '#ffffff',
+          fontWeight: 'bold',
+          ancestorToHighlight: [],
+          highlightIfAncestorNotFound: true,
+        });
+      }
+    }
     //this.displayTimeSpent();
     this.textHighlightColorMap = this.calculateTextHighlightColorMap();
     this.textValuesToMonitor = Object.keys(this.textHighlightColorMap);
@@ -122,6 +140,42 @@ class ConditionalFormatting {
     GLOBAL.mutationObserverRegistry.addFunctionForNodeAddition(
       this.defectRequestMod,
     );
+    // Input/select values are not text nodes and change without DOM mutations,
+    // so they are checked periodically.
+    setInterval(this.highlightFieldValues, 1000);
+  };
+
+  highlightFieldValues = () => {
+    // Skip the full-page scan while the browser tab is in the background
+    if (document.hidden) return;
+    const warningStyles = this.textMatchStyles.filter((s) =>
+      this.warningTexts.includes(s.text),
+    );
+    const controls =
+      deepQuerySelector('input, select, a[role="combobox"]') || [];
+    for (const el of controls) {
+      let value = el.value || '';
+      if (el.tagName === 'SELECT' && el.selectedOptions?.length)
+        value = el.selectedOptions[0].textContent.trim();
+      else if (el.tagName === 'A') value = (el.textContent || '').trim();
+      // Aura picklists show the value in a child span; style it too
+      const targets = [el, ...(el.tagName === 'A' ? el.querySelectorAll('span') : [])];
+      const style = warningStyles.find((s) => value.includes(s.text));
+      for (const t of targets) {
+        if (style) {
+          t.style.setProperty('background-color', style.bgColor, 'important');
+          t.style.setProperty('color', style.textColor, 'important');
+          if (style.fontWeight)
+            t.style.setProperty('font-weight', style.fontWeight, 'important');
+          t.dataset.scpWarnHighlight = '1';
+        } else if (t.dataset.scpWarnHighlight) {
+          t.style.removeProperty('background-color');
+          t.style.removeProperty('color');
+          t.style.removeProperty('font-weight');
+          delete t.dataset.scpWarnHighlight;
+        }
+      }
+    }
   };
 
   processMutation = (mutation, observerName) => {
@@ -591,7 +645,8 @@ class ConditionalFormatting {
     }
   };
 
-  waitForFileLinks = () => {
+  waitForFileLinks = (attempt = 0) => {
+    if (attempt >= 300) return; // give up after ~30s
     setTimeout(() => {
       let fileTabCloseButton = $(`button[title="Close Files"]`);
       console.log('close button', fileTabCloseButton);
@@ -605,7 +660,7 @@ class ConditionalFormatting {
         GLOBAL.fileLinks = fileLinks;
         if (typeof GLOBAL.imageUrlResolvedCallback == 'function')
           GLOBAL.imageUrlResolvedCallback(fileLinks);
-      } else this.waitForFileLinks();
+      } else this.waitForFileLinks(attempt + 1);
     }, 100);
   };
 
@@ -932,6 +987,7 @@ class ConditionalFormatting {
   styleThis = (el, style) => {
     el.css('background-color', style.bgColor);
     el.css('color', style.textColor);
+    if (style.fontWeight) el.css('font-weight', style.fontWeight);
   };
 
   gatherCaseIdNumberPairs = (textNode) => {
@@ -1982,8 +2038,8 @@ class UIinjector {
     return `<div class="roland-ui-mods-form">
         <div class="roland-ui-mods-form-heading">Release notes for version: ${GLOBAL.version}</div>
         <ul>
-          <li>&bull;&nbsp;New "Download all files" button on Case attachment pages, saving all files as a ZIP or into a folder per Case.</li><br>
-          <li>&bull;&nbsp;New settings to enable the button and choose the download format.</li><br>
+          <li>&bull;&nbsp;Highlight "Please select 'Dev Request' or 'Defect' to create a new record." in blue on the Dev Shared Capabilities card, in the dropdown list and in the selected field value.</li><br>
+          <li>&bull;&nbsp;Fixed a background retry loop when looking for Case file links, which now stops after about 30 seconds.</li><br>
         </ul>
         <br>
 
@@ -2560,7 +2616,7 @@ const GLOBAL = {
   fileTabCloseButton: null,
   hideLeftColumn: false,
   downloadAllFiles: null,
-  version: '2026.11.09.01',
+  version: '2026.11.18.01',
 };
 // ============================================================
 // DOWNLOAD ALL CASE FILES
